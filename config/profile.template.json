@@ -1,0 +1,36 @@
+{
+  "_readme": "Copy to data/profile/profile.json (or edit in the web UI, Profile tab). Everything here is handed to Claude when it fills a form. Leave a value empty if you don't want it used. EEO fields accept a value or \"decline\".",
+  "identity": {
+    "first_name": "", "last_name": "", "preferred_name": "",
+    "email": "", "phone": "",
+    "address_line1": "", "address_line2": "", "city": "", "state": "", "zip": "", "country": "United States"
+  },
+  "links": {"linkedin": "", "github": "", "website": "", "portfolio": ""},
+  "education": [
+    {"school": "", "degree": "", "field": "", "gpa": "", "start": "YYYY-MM", "end": "YYYY-MM", "expected": true}
+  ],
+  "work_authorization": {
+    "authorized_to_work_in_us": true,
+    "current_status": "F-1 student (OPT eligible)",
+    "requires_sponsorship_now_or_future": true,
+    "sponsorship_answer_text": "Yes. I am on F-1 and will need H-1B sponsorship in the future; I can start on OPT without sponsorship.",
+    "us_citizen": false, "permanent_resident": false, "security_clearance": "none"
+  },
+  "preferences": {
+    "earliest_start_date": "", "willing_to_relocate": true, "preferred_locations": [],
+    "salary_expectation_text": "Open to market rate for the role and location",
+    "remote_preference": "onsite or hybrid", "how_did_you_hear": "hiring.cafe"
+  },
+  "eeo": {"gender": "decline", "ethnicity": "decline", "veteran_status": "I am not a protected veteran", "disability_status": "decline", "sexual_orientation": "decline"},
+  "background": {
+    "years_of_experience": "0-1", "over_18": true, "previously_employed_here": false,
+    "relatives_at_company": false, "non_compete": false, "convicted": false
+  },
+  "rules_for_claude": [
+    "Never click the final Submit / Send Application button. Stop on the review page.",
+    "Do not invent facts. If a required field cannot be answered from this profile, the resume, or the answer bank, stop and report it as an unanswered question.",
+    "Prefer 'decline to self-identify' for EEO questions marked decline.",
+    "If the site needs an account, create one with the profile email; report the password you generated in the summary.",
+    "If a CAPTCHA, phone verification or email code appears, stop and report it."
+  ]
+}

@@ -54,6 +54,33 @@ Edit `config/search.json`. It has two parts:
 
 Then run `jobfilter py validate` to check it, and `jobfilter run` to try it.
 
+## Let Claude fill the application for you
+
+The **Applications** tab in the web page hands a job to Claude, which fills the
+form inside your own Chrome window while you watch, and stops on the review
+page. You click Submit.
+
+```mermaid
+flowchart LR
+    J[Job in the list] -->|Prepare| C[Claude in your Chrome]
+    C -->|fills the form| R[Review page, you submit]
+    C -->|unknown question| Q[Asks you in the web page]
+    Q -->|your answer| C
+    P[Profile + resume + answer bank] -.-> C
+```
+
+One-time setup:
+
+1. Install the [Claude in Chrome](https://chromewebstore.google.com/detail/claude/fcoeoabgfenejglbffodgkkbkcdhcgfn) extension and sign in with your Claude account (Pro or Max plan).
+2. In a terminal run `claude --chrome` once and follow the prompt. This connects the extension to Claude Code.
+3. Put your resume PDF in `data/resume/` and fill in the **Profile** tab (address, work authorization, sponsorship answer, and so on).
+
+Then, per job: open it in the Jobs tab, click **Prepare application with Claude**,
+and switch to the Applications tab. You will see Claude's steps as they
+happen, the questions it could not answer (answer once, it remembers), and
+a screenshot of the review page when it is done. Claude pauses for logins,
+email codes and CAPTCHAs; the tab is left open for you.
+
 ## Where things go
 
 | Path | Contents |
@@ -61,6 +88,8 @@ Then run `jobfilter py validate` to check it, and `jobfilter run` to try it.
 | `data/jobs.db` | all jobs ever matched |
 | `data/excel/2026-09-15.xlsx` | one workbook per day |
 | `data/scheduler.log` | scan output |
+| `data/profile/` | your profile, answer bank, resume text |
+| `data/apply/<job>/` | Claude's log and review screenshot per application |
 
 All of `data/` stays on your machine and is not committed.
 

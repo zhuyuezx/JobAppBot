@@ -165,8 +165,48 @@ def cmd_schedule(args) -> int:
     return 0
 
 
+def cmd_profile(args) -> int:
+    from jobFilter import profile as prof
+    if args.action == "init":
+        path = prof.init_profile(overwrite=args.force)
+        prof.resume_text(refresh=True)
+        log(f"profile: {path}\nresume: {prof.resume_path()}\nedit the JSON or use the Profile tab in the UI")
+    else:
+        print(json.dumps(prof.status(), indent=2))
+    return 0
+
+
+def cmd_apply(args) -> int:
+    from jobFilter import apply_engine
+    from jobFilter.store import Store
+    store = Store(DB_PATH)
+    if args.action == "queue":
+        matches = [r for r in store.query() if r["id"].startswith(args.job_id)]
+        if len(matches) != 1:
+            log(f"{len(matches)} jobs match '{args.job_id}'; give a longer id prefix")
+            return 1
+        a = store.queue_application(matches[0]["id"])
+        log(f"queued: {a['job']['title']} @ {a['job']['company']}")
+        return 0
+    if args.action == "list":
+        for a in store.list_applications():
+            print(f"{a['status']:<15} {a['job']['title']} @ {a['job']['company']}  [{a['job_id'][:40]}]\n    {a.get('summary') or ''}")
+        return 0
+    if args.action == "worker":
+        log(f"engine: {json.dumps(apply_engine.engine_status())}")
+        app = store.next_queued()
+        while app:
+            log(f"running {app['job']['title']} @ {app['job']['company']}")
+            res = apply_engine.run_application(store, app)
+            log(f"  -> {res['status']}: {res['summary'][:200]}")
+            app = None if args.once else store.next_queued()
+        log("no queued applications")
+        return 0
+    return 1
+
+
 # ----- parser -------------------------------------------------------------
-SUBCOMMANDS = {"run", "validate", "list", "excel", "serve", "schedule"}
+SUBCOMMANDS = {"run", "validate", "list", "excel", "serve", "schedule", "apply", "profile"}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -198,6 +238,17 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--host", default="127.0.0.1")
     s.add_argument("--port", type=int, default=8765)
     s.set_defaults(func=cmd_serve)
+
+    pr = sub.add_parser("profile", help="applicant profile used by the apply engine")
+    pr.add_argument("action", choices=["init", "status"])
+    pr.add_argument("--force", action="store_true", help="overwrite an existing profile.json with the template")
+    pr.set_defaults(func=cmd_profile)
+
+    ap = sub.add_parser("apply", help="queue / list / run applications (Claude in Chrome)")
+    ap.add_argument("action", choices=["queue", "list", "worker"])
+    ap.add_argument("job_id", nargs="?", help="job id prefix (for queue)")
+    ap.add_argument("--once", action="store_true", help="worker: process one application then exit")
+    ap.set_defaults(func=cmd_apply)
 
     sc = sub.add_parser("schedule", help="foreground loop that runs `run` every --interval seconds")
     sc.add_argument("--interval", type=int, default=3600)

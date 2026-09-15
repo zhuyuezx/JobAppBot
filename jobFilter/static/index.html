@@ -5,135 +5,333 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>jobFilter</title>
 <style>
-  :root { --bg:#fafafa; --fg:#1a1a1a; --muted:#6b6b6b; --line:#e3e3e3; --accent:#3b5bdb; --chip:#eef1fb; }
+  :root { --bg:#fafafa; --fg:#1a1a1a; --muted:#6b6b6b; --line:#e3e3e3; --accent:#3b5bdb; --chip:#eef1fb; --ok:#d3f9d8; --okfg:#0b5d1e; --warn:#fff3bf; --warnfg:#5c4400; --bad:#ffe3e3; --badfg:#7a1010; }
   @media (prefers-color-scheme: dark) {
-    :root { --bg:#161616; --fg:#eaeaea; --muted:#9a9a9a; --line:#2c2c2c; --accent:#8da2fb; --chip:#232838; }
+    :root { --bg:#161616; --fg:#eaeaea; --muted:#9a9a9a; --line:#2c2c2c; --accent:#8da2fb; --chip:#232838; --ok:#153b1f; --okfg:#9be7a8; --warn:#3d3410; --warnfg:#ffe08a; --bad:#3d1414; --badfg:#ff9c9c; }
   }
   * { box-sizing: border-box; }
   body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-  header { display:flex; flex-wrap:wrap; gap:10px; align-items:center; padding:14px 20px; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--bg); z-index:2; }
+  header { display:flex; flex-wrap:wrap; gap:10px; align-items:center; padding:12px 20px; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--bg); z-index:2; }
   header h1 { font-size:16px; margin:0 12px 0 0; font-weight:650; }
   .seg { display:flex; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
   .seg button { border:0; background:transparent; color:var(--fg); padding:6px 12px; cursor:pointer; font:inherit; }
   .seg button.on { background:var(--accent); color:#fff; }
-  select, input[type=search] { font:inherit; padding:6px 10px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--fg); }
+  select, input[type=search], input[type=text], textarea { font:inherit; padding:6px 10px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--fg); }
   input[type=search] { min-width:220px; }
+  textarea { width:100%; min-height:80px; font-family: ui-monospace, Menlo, monospace; font-size:12px; }
   .count { color:var(--muted); margin-left:auto; }
-  main { padding: 8px 20px 40px; max-width:1200px; margin:0 auto; }
-  .job { border-bottom:1px solid var(--line); }
+  main { padding: 8px 20px 60px; max-width:1200px; margin:0 auto; }
+  .job, .app { border-bottom:1px solid var(--line); }
   .row { display:grid; grid-template-columns: 1fr 200px 220px 130px; gap:12px; padding:10px 6px; cursor:pointer; align-items:baseline; }
   .row:hover { background:var(--chip); }
   .row .title { font-weight:600; }
   .row .title a { color:var(--accent); text-decoration:none; }
   .row .title a:hover { text-decoration:underline; }
-  .row .muted { color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .badge { display:inline-block; font-size:11px; padding:1px 7px; border-radius:999px; background:var(--chip); color:var(--fg); margin-left:6px; vertical-align:middle; }
-  .badge.visa { background:#d3f9d8; color:#0b5d1e; }
-  .badge.new { background:#fff3bf; color:#5c4400; }
+  .muted { color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .badge { display:inline-block; font-size:11px; padding:1px 7px; border-radius:999px; background:var(--chip); color:var(--fg); margin-left:6px; vertical-align:middle; white-space:nowrap; }
+  .badge.ok { background:var(--ok); color:var(--okfg); } .badge.warn { background:var(--warn); color:var(--warnfg); } .badge.bad { background:var(--bad); color:var(--badfg); }
   .details { display:none; padding: 4px 6px 16px 6px; }
-  .job.open .details { display:block; }
-  .kv { display:grid; grid-template-columns: 140px 1fr; gap:4px 12px; margin:6px 0 10px; }
-  .kv dt { color:var(--muted); }
-  .kv dd { margin:0; }
+  .open .details { display:block; }
+  .kv { display:grid; grid-template-columns: 150px 1fr; gap:4px 12px; margin:6px 0 10px; }
+  .kv dt { color:var(--muted); } .kv dd { margin:0; }
   .links a { display:inline-block; margin-right:14px; color:var(--accent); }
+  .btn { font:inherit; padding:5px 11px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--fg); cursor:pointer; }
+  .btn.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .btn:disabled { opacity:.5; cursor:default; }
+  .actions { display:flex; flex-wrap:wrap; gap:8px; margin:8px 0; }
   .empty { color:var(--muted); padding:40px 0; text-align:center; }
-  @media (max-width: 800px) { .row { grid-template-columns: 1fr; gap:2px; } .kv { grid-template-columns: 1fr; } }
+  .banner { padding:10px 14px; border:1px solid var(--line); border-radius:10px; margin:12px 0; display:flex; flex-wrap:wrap; gap:8px 18px; align-items:center; }
+  .banner.bad { border-color: var(--badfg); }
+  pre.log { background:var(--chip); padding:10px; border-radius:8px; max-height:320px; overflow:auto; font-size:12px; white-space:pre-wrap; }
+  .q { border:1px solid var(--line); border-radius:10px; padding:10px; margin:8px 0; }
+  .q .qt { font-weight:600; margin-bottom:6px; }
+  .q input[type=text] { width:100%; }
+  img.shot { max-width:100%; border:1px solid var(--line); border-radius:8px; margin-top:8px; }
+  h2 { font-size:15px; margin:18px 0 8px; }
+  .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
+  table { border-collapse:collapse; width:100%; } td, th { text-align:left; padding:6px; border-bottom:1px solid var(--line); vertical-align:top; } th { color:var(--muted); font-weight:500; }
+  @media (max-width: 800px) { .row { grid-template-columns: 1fr; gap:2px; } .kv, .grid2 { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
 <header>
   <h1>jobFilter</h1>
-  <div class="seg" id="mode">
-    <button data-mode="24h" class="on">Last 24h</button>
-    <button data-mode="72h">Last 3 days</button>
-    <button data-mode="date">By date</button>
-    <button data-mode="all">All</button>
+  <div class="seg" id="tabs">
+    <button data-tab="jobs" class="on">Jobs</button>
+    <button data-tab="apps">Applications <span id="appsBadge" class="badge" hidden></span></button>
+    <button data-tab="profile">Profile</button>
   </div>
-  <select id="date" hidden></select>
-  <input id="q" type="search" placeholder="filter title / company / location">
+  <div id="jobsControls" style="display:contents">
+    <div class="seg" id="mode">
+      <button data-mode="24h" class="on">Last 24h</button>
+      <button data-mode="72h">Last 3 days</button>
+      <button data-mode="date">By date</button>
+      <button data-mode="all">All</button>
+    </div>
+    <select id="date" hidden></select>
+    <input id="q" type="search" placeholder="filter title / company / location">
+  </div>
   <span class="count" id="count"></span>
 </header>
-<main id="list"></main>
+<main>
+  <section id="tab-jobs"><div id="list"></div></section>
+  <section id="tab-apps" hidden>
+    <div id="engine" class="banner"></div>
+    <div id="apps"></div>
+  </section>
+  <section id="tab-profile" hidden>
+    <div id="profileStatus" class="banner"></div>
+    <div class="grid2">
+      <div>
+        <h2>Profile (JSON)</h2>
+        <p class="muted" style="white-space:normal">Everything here is handed to Claude when it fills a form. Template: <code>config/profile.template.json</code>.</p>
+        <textarea id="profileText" style="min-height:520px"></textarea>
+        <div class="actions"><button class="btn primary" id="saveProfile">Save profile</button><span id="profileMsg" class="muted"></span></div>
+      </div>
+      <div>
+        <h2>Answer bank</h2>
+        <p class="muted" style="white-space:normal">Reused for every application. Questions you answer in the Applications tab land here automatically.</p>
+        <div class="q"><div class="qt">Add an answer</div>
+          <input type="text" id="newQ" placeholder="Question, e.g. Why do you want to work here?">
+          <textarea id="newA" placeholder="Your answer" style="min-height:60px;margin-top:6px"></textarea>
+          <div class="actions"><button class="btn" id="addAnswer">Add</button></div></div>
+        <table id="answers"></table>
+      </div>
+    </div>
+  </section>
+</main>
 
 <script>
 const $ = s => document.querySelector(s);
-let mode = '24h', rows = [], dates = [];
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmt = iso => iso ? iso.slice(0, 16).replace('T', ' ') : '';
+const isRecent = iso => Date.now() - Date.parse(iso) < 24 * 3600 * 1000;
+const money = (a, b) => { const f = n => n == null ? null : '$' + Math.round(n).toLocaleString(); const x = f(a), y = f(b); return x && y ? `${x} - ${y}` : (x || y || ''); };
+async function api(path, body) {
+  const r = await fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : undefined);
+  return r.json();
+}
+const STATUS_CLASS = { queued: '', running: 'warn', review_ready: 'ok', needs_answer: 'warn', needs_login: 'warn', captcha: 'warn', already_applied: '', failed: 'bad', submitted: 'ok', skipped: '' };
+const STATUS_LABEL = { queued: 'queued', running: 'Claude is working', review_ready: 'ready to submit', needs_answer: 'needs your answer', needs_login: 'needs login / code', captcha: 'CAPTCHA', already_applied: 'already applied', failed: 'failed', submitted: 'submitted', skipped: 'skipped' };
+const badge = st => st ? `<span class="badge ${STATUS_CLASS[st] || ''}">${esc(STATUS_LABEL[st] || st)}</span>` : '';
 
-async function api(path) { const r = await fetch(path); return r.json(); }
+// ---------------- tabs ----------------
+let tab = 'jobs';
+$('#tabs').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  tab = b.dataset.tab;
+  document.querySelectorAll('#tabs button').forEach(x => x.classList.toggle('on', x === b));
+  ['jobs', 'apps', 'profile'].forEach(t => $('#tab-' + t).hidden = t !== tab);
+  $('#jobsControls').style.display = tab === 'jobs' ? 'contents' : 'none';
+  $('#count').textContent = '';
+  if (tab === 'jobs') load(); if (tab === 'apps') loadApps(); if (tab === 'profile') loadProfile();
+});
 
-function fmt(iso) { if (!iso) return ''; return iso.slice(0, 16).replace('T', ' '); }
-function isRecent(iso) { return Date.now() - Date.parse(iso) < 24 * 3600 * 1000; }
-function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
-function money(a, b) { const f = n => n == null ? null : '$' + Math.round(n).toLocaleString(); const x = f(a), y = f(b); return x && y ? `${x} - ${y}` : (x || y || ''); }
-
+// ---------------- jobs ----------------
+let mode = '24h', rows = [];
+function jobDetails(j, r) {
+  return `<dl class="kv">
+    <dt>Workplace</dt><dd>${esc(j.workplace_type || '')}</dd>
+    <dt>Seniority / min YoE</dt><dd>${esc(j.seniority || '')} ${j.min_yoe != null ? '/ ' + j.min_yoe + ' yr' : ''}</dd>
+    <dt>Category</dt><dd>${esc(j.category || '')}</dd>
+    <dt>Clearance</dt><dd>${esc(j.security_clearance || '')}</dd>
+    <dt>Salary (yearly)</dt><dd>${money(j.yearly_min_comp, j.yearly_max_comp)}</dd>
+    <dt>Tools</dt><dd>${esc((j.technical_tools || []).join(', '))}</dd>
+    <dt>Requirements</dt><dd>${esc(j.requirements_summary || '')}</dd>
+    <dt>Company site</dt><dd>${esc(j.company_website || '')}</dd>
+    <dt>Source</dt><dd>${esc(j.source || '')}</dd>
+    <dt>First seen</dt><dd>${fmt(r.first_seen)} (seen ${r.seen_count}x)</dd>
+  </dl>`;
+}
 function render() {
   const q = $('#q').value.trim().toLowerCase();
   const shown = rows.filter(r => !q || [r.title, r.company, r.location].join(' ').toLowerCase().includes(q));
   $('#count').textContent = `${shown.length} job${shown.length === 1 ? '' : 's'}` + (q ? ` (of ${rows.length})` : '');
-  if (!shown.length) { $('#list').innerHTML = '<div class="empty">Nothing here. Run <code>python -m jobFilter run</code> to fetch.</div>'; return; }
+  if (!shown.length) { $('#list').innerHTML = '<div class="empty">Nothing here. Run <code>jobfilter run</code> to fetch.</div>'; return; }
   $('#list').innerHTML = shown.map(r => {
-    const j = r.job;
-    const link = j.apply_url || r.hc_url;
+    const j = r.job, link = j.apply_url || r.hc_url;
     return `<div class="job" data-id="${esc(r.id)}">
       <div class="row">
         <div class="title"><a href="${esc(link)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(j.title)}</a>
-          ${j.visa_sponsorship ? '<span class="badge visa">visa</span>' : ''}${isRecent(r.first_seen) ? '<span class="badge new">new</span>' : ''}</div>
+          ${j.visa_sponsorship ? '<span class="badge ok">visa</span>' : ''}${isRecent(r.first_seen) ? '<span class="badge warn">new</span>' : ''}${badge(r.app_status)}</div>
         <div class="muted" title="${esc(j.company)}">${esc(j.company)}</div>
         <div class="muted" title="${esc(j.location)}">${esc(j.location || '')}</div>
-        <div class="muted" title="posted">${fmt(j.published_at)}</div>
+        <div class="muted">${fmt(j.published_at)}</div>
       </div>
       <div class="details">
-        <dl class="kv">
-          <dt>Workplace</dt><dd>${esc(j.workplace_type || '')}</dd>
-          <dt>Seniority / min YoE</dt><dd>${esc(j.seniority || '')} ${j.min_yoe != null ? '/ ' + j.min_yoe + ' yr' : ''}</dd>
-          <dt>Category</dt><dd>${esc(j.category || '')}</dd>
-          <dt>Clearance</dt><dd>${esc(j.security_clearance || '')}</dd>
-          <dt>Salary (yearly)</dt><dd>${money(j.yearly_min_comp, j.yearly_max_comp)}</dd>
-          <dt>Tools</dt><dd>${esc((j.technical_tools || []).join(', '))}</dd>
-          <dt>Requirements</dt><dd>${esc(j.requirements_summary || '')}</dd>
-          <dt>Company site</dt><dd>${esc(j.company_website || '')}</dd>
-          <dt>Source</dt><dd>${esc(j.source || '')}</dd>
-          <dt>First seen</dt><dd>${fmt(r.first_seen)} (seen ${r.seen_count}x)</dd>
-        </dl>
-        <div class="links">
-          ${j.apply_url ? `<a href="${esc(j.apply_url)}" target="_blank" rel="noopener">Apply page</a>` : ''}
-          <a href="${esc(r.hc_url)}" target="_blank" rel="noopener">hiring.cafe</a>
+        ${jobDetails(j, r)}
+        <div class="actions">
+          ${r.app_status ? `<button class="btn" data-act="goapps">Open in Applications</button>` : `<button class="btn primary" data-act="prepare">Prepare application with Claude</button>`}
+          ${j.apply_url ? `<a class="btn" href="${esc(j.apply_url)}" target="_blank" rel="noopener">Apply page</a>` : ''}
+          <a class="btn" href="${esc(r.hc_url)}" target="_blank" rel="noopener">hiring.cafe</a>
         </div>
       </div>
     </div>`;
   }).join('');
 }
-
 async function load() {
   let path = '/api/jobs';
-  if (mode === '24h') path += '?since=24';
-  else if (mode === '72h') path += '?since=72';
+  if (mode === '24h') path += '?since=24'; else if (mode === '72h') path += '?since=72';
   else if (mode === 'date') path += '?date=' + encodeURIComponent($('#date').value || '');
-  rows = await api(path);
-  render();
+  rows = await api(path); render();
 }
-
 async function loadDates() {
-  dates = await api('/api/dates');
-  const sel = $('#date');
-  sel.innerHTML = dates.map(d => `<option value="${d.date}">${d.date} (${d.count})</option>`).join('') || '<option value="">no data</option>';
+  const dates = await api('/api/dates');
+  $('#date').innerHTML = dates.map(d => `<option value="${d.date}">${d.date} (${d.count})</option>`).join('') || '<option value="">no data</option>';
 }
-
 $('#mode').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
   mode = b.dataset.mode;
   document.querySelectorAll('#mode button').forEach(x => x.classList.toggle('on', x === b));
-  $('#date').hidden = mode !== 'date';
-  load();
+  $('#date').hidden = mode !== 'date'; load();
 });
 $('#date').addEventListener('change', load);
 $('#q').addEventListener('input', render);
-$('#list').addEventListener('click', e => {
-  const job = e.target.closest('.job'); if (!job || e.target.closest('a')) return;
+$('#list').addEventListener('click', async e => {
+  const job = e.target.closest('.job'); if (!job) return;
+  const act = e.target.closest('[data-act]');
+  if (act) {
+    if (act.dataset.act === 'prepare') {
+      act.disabled = true; act.textContent = 'Queued...';
+      const r = await api('/api/applications/queue', { job_id: job.dataset.id });
+      if (r.error) alert(r.error);
+      await load(); $('#tabs button[data-tab=apps]').click();
+    } else if (act.dataset.act === 'goapps') { $('#tabs button[data-tab=apps]').click(); }
+    return;
+  }
+  if (e.target.closest('a')) return;
   job.classList.toggle('open');
 });
 
+// ---------------- applications ----------------
+let apps = [], openApp = null, appsTimer = null;
+function engineBanner(st) {
+  const ok = st.claude && st.chrome_host_installed && st.profile.profile_exists;
+  const parts = [
+    st.claude ? '✓ Claude Code found' : '✗ Claude Code binary not found (set JOBFILTER_CLAUDE)',
+    st.chrome_host_installed ? '✓ Chrome integration set up' : '✗ Chrome integration not set up: install the "Claude in Chrome" extension, then run <code>claude --chrome</code> once in a terminal',
+    st.profile.profile_exists ? '✓ Profile saved' : '✗ No profile yet: fill the Profile tab',
+    st.profile.resume ? '✓ Resume: ' + esc(st.profile.resume.split('/').pop()) : '✗ No PDF in data/resume/',
+    `answer bank: ${st.profile.answers}`,
+    st.worker_alive ? (st.current_job ? '● working on ' + esc(st.current_job.slice(0, 30)) : '● worker idle') : '○ worker not started',
+  ];
+  const m = st.settings.model, choices = st.model_choices.includes(m) ? st.model_choices : [...st.model_choices, m];
+  const modelUi = `<label>model <select id="modelSel">${choices.map(c => `<option value="${esc(c)}" ${c === m ? 'selected' : ''}>${esc(c)}</option>`).join('')}<option value="__custom">custom...</option></select></label>
+    <label>max turns <input type="text" id="turnsInp" value="${st.settings.max_turns}" style="width:60px"></label>
+    <button class="btn" id="saveSettings">Save</button><span id="settingsMsg" class="muted"></span>`;
+  $('#engine').className = 'banner' + (ok ? '' : ' bad');
+  $('#engine').innerHTML = parts.map(p => `<span>${p}</span>`).join('') + `<span style="margin-left:auto;display:flex;gap:8px;align-items:center">${modelUi}</span>`;
+  $('#modelSel').addEventListener('change', e => {
+    if (e.target.value !== '__custom') return;
+    const v = prompt('Model name or alias (e.g. opus, sonnet, claude-opus-5):', m);
+    if (v) { const o = document.createElement('option'); o.value = o.textContent = v; o.selected = true; e.target.insertBefore(o, e.target.lastElementChild); } else e.target.value = m;
+  });
+  $('#saveSettings').addEventListener('click', async () => {
+    const r = await api('/api/settings', { model: $('#modelSel').value, max_turns: Number($('#turnsInp').value) || 120 });
+    $('#settingsMsg').textContent = r.error ? r.error : `saved: ${r.model}, ${r.max_turns} turns (applies to the next run)`;
+  });
+}
+function appDetails(a) {
+  const j = a.job, qs = (a.questions || []).filter(q => q.status === 'open');
+  return `<div class="details">
+    <dl class="kv">
+      <dt>Status</dt><dd>${badge(a.status)} <span class="muted">attempt ${a.attempts}, updated ${fmt(a.updated_at)}</span></dd>
+      <dt>Summary</dt><dd>${esc(a.summary || '')}</dd>
+      ${a.page_url ? `<dt>Tab</dt><dd><a href="${esc(a.page_url)}" target="_blank" rel="noopener">${esc(a.page_url)}</a></dd>` : ''}
+      <dt>Note</dt><dd><input type="text" data-note value="${esc(a.note || '')}" placeholder="your note, saved with status changes" style="width:100%"></dd>
+    </dl>
+    ${qs.length ? `<h2>Claude needs your answers (${qs.length})</h2>` + qs.map(q => `<div class="q" data-qid="${q.id}">
+        <div class="qt">${esc(q.question)}</div>
+        ${q.options ? `<div class="muted" style="white-space:normal">Options: ${esc(q.options.join(' | '))}</div>` : ''}
+        <input type="text" data-answer placeholder="your answer">
+        <div class="actions"><button class="btn primary" data-act="answer">Answer &amp; save to bank</button><button class="btn" data-act="answer-once">Answer once</button></div>
+      </div>`).join('') : ''}
+    <div class="actions">
+      ${['review_ready','needs_login','captcha'].includes(a.status) ? `<a class="btn primary" href="${esc(a.page_url || j.apply_url)}" target="_blank" rel="noopener">Open the tab and finish</a>` : ''}
+      ${['review_ready','needs_login','captcha'].includes(a.status) ? `<button class="btn" data-act="status" data-status="submitted">Mark submitted</button>` : ''}
+      ${['failed','needs_login','captcha','already_applied','skipped','submitted'].includes(a.status) ? `<button class="btn" data-act="retry">Run again</button>` : ''}
+      ${['queued','running'].includes(a.status) ? `<button class="btn" data-act="status" data-status="skipped">Cancel</button>` : `<button class="btn" data-act="status" data-status="skipped">Skip</button>`}
+      <button class="btn" data-act="refresh">Refresh</button>
+    </div>
+    ${a.screenshot ? `<img class="shot" src="/api/file?path=${encodeURIComponent(a.screenshot)}" alt="review page">` : ''}
+    <h2>What Claude did</h2>
+    <pre class="log" data-log>${esc((a.log || []).join('\n')) || '(no log yet)'}</pre>
+  </div>`;
+}
+function renderApps() {
+  const counts = {}; apps.forEach(a => counts[a.status] = (counts[a.status] || 0) + 1);
+  $('#count').textContent = Object.entries(counts).map(([k, v]) => `${v} ${STATUS_LABEL[k] || k}`).join(' · ');
+  const attention = apps.filter(a => ['review_ready', 'needs_answer', 'needs_login', 'captcha'].includes(a.status)).length;
+  $('#appsBadge').hidden = !attention; $('#appsBadge').textContent = attention;
+  if (!apps.length) { $('#apps').innerHTML = '<div class="empty">No applications yet. Open a job in the Jobs tab and click "Prepare application with Claude".</div>'; return; }
+  const order = ['needs_answer', 'review_ready', 'needs_login', 'captcha', 'running', 'queued', 'failed', 'already_applied', 'submitted', 'skipped'];
+  apps.sort((x, y) => order.indexOf(x.status) - order.indexOf(y.status) || (y.updated_at > x.updated_at ? 1 : -1));
+  $('#apps').innerHTML = apps.map(a => `<div class="app ${openApp === a.job_id ? 'open' : ''}" data-id="${esc(a.job_id)}">
+      <div class="row">
+        <div class="title"><a href="${esc(a.job.apply_url || a.hc_url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(a.job.title)}</a>${badge(a.status)}${a.open_questions ? `<span class="badge warn">${a.open_questions} question${a.open_questions > 1 ? 's' : ''}</span>` : ''}</div>
+        <div class="muted">${esc(a.job.company)}</div>
+        <div class="muted">${esc(a.summary || '').slice(0, 80)}</div>
+        <div class="muted">${fmt(a.updated_at)}</div>
+      </div>
+      ${openApp === a.job_id ? appDetails(a) : '<div class="details"></div>'}
+    </div>`).join('');
+}
+async function loadApps() {
+  const [st, list] = await Promise.all([api('/api/engine'), api('/api/applications')]);
+  engineBanner(st);
+  apps = list;
+  if (openApp) { const full = await api('/api/application?id=' + encodeURIComponent(openApp)); const i = apps.findIndex(a => a.job_id === openApp); if (i >= 0 && !full.error) apps[i] = full; }
+  renderApps();
+  clearTimeout(appsTimer);
+  if (tab === 'apps' && apps.some(a => ['queued', 'running'].includes(a.status))) appsTimer = setTimeout(loadApps, 4000);
+}
+$('#apps').addEventListener('click', async e => {
+  const el = e.target.closest('.app'); if (!el) return;
+  const id = el.dataset.id, act = e.target.closest('[data-act]');
+  if (act) {
+    const kind = act.dataset.act;
+    if (kind === 'status') await api('/api/applications/status', { job_id: id, status: act.dataset.status, note: el.querySelector('[data-note]')?.value || '' });
+    else if (kind === 'retry') await api('/api/applications/retry', { job_id: id });
+    else if (kind === 'answer' || kind === 'answer-once') {
+      const qel = act.closest('.q'); const ans = qel.querySelector('[data-answer]').value.trim();
+      if (!ans) return;
+      const r = await api('/api/questions/answer', { id: Number(qel.dataset.qid), answer: ans, save: kind === 'answer' });
+      if (r.requeued) $('#count').textContent = 'All answered, Claude is continuing...';
+    }
+    await loadApps(); return;
+  }
+  if (e.target.closest('a') || e.target.closest('input')) return;
+  openApp = openApp === id ? null : id;
+  await loadApps();
+});
+
+// ---------------- profile ----------------
+async function loadProfile() {
+  const [{ profile, status }, answers] = await Promise.all([api('/api/profile'), api('/api/answers')]);
+  $('#profileStatus').innerHTML = [
+    status.profile_exists ? '✓ data/profile/profile.json' : '✗ not saved yet (showing the template)',
+    status.resume ? '✓ resume: ' + esc(status.resume.split('/').pop()) + ` (${status.resume_text_chars} chars extracted)` : '✗ put a PDF in data/resume/',
+    `${answers.length} bank answers`].map(x => `<span>${x}</span>`).join('');
+  $('#profileText').value = JSON.stringify(profile, null, 2);
+  $('#answers').innerHTML = answers.length ? '<tr><th>Question</th><th>Answer</th><th></th></tr>' + answers.map(a =>
+    `<tr><td>${esc(a.question)}</td><td>${esc(a.answer)}</td><td><button class="btn" data-del="${a.id}">✕</button></td></tr>`).join('') : '<tr><td class="muted">empty</td></tr>';
+}
+$('#saveProfile').addEventListener('click', async () => {
+  let obj; try { obj = JSON.parse($('#profileText').value); } catch (e) { $('#profileMsg').textContent = 'Invalid JSON: ' + e.message; return; }
+  const r = await api('/api/profile', { profile: obj });
+  $('#profileMsg').textContent = r.ok ? 'Saved.' : (r.error || 'error'); loadProfile();
+});
+$('#addAnswer').addEventListener('click', async () => {
+  const q = $('#newQ').value.trim(), a = $('#newA').value.trim(); if (!q) return;
+  await api('/api/answers', { question: q, answer: a }); $('#newQ').value = ''; $('#newA').value = ''; loadProfile();
+});
+$('#answers').addEventListener('click', async e => {
+  const b = e.target.closest('[data-del]'); if (!b) return;
+  await api('/api/answers/delete', { id: Number(b.dataset.del) }); loadProfile();
+});
+
 loadDates().then(load);
+api('/api/engine').then(st => { const n = (st.counts.review_ready || 0) + (st.counts.needs_answer || 0) + (st.counts.needs_login || 0) + (st.counts.captcha || 0); $('#appsBadge').hidden = !n; $('#appsBadge').textContent = n; });
 </script>
 </body>
 </html>

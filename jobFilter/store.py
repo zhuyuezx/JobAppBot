@@ -31,6 +31,32 @@ CREATE TABLE IF NOT EXISTS jobs (
 CREATE INDEX IF NOT EXISTS jobs_dedup ON jobs(dedup_key);
 CREATE INDEX IF NOT EXISTS jobs_first_seen ON jobs(first_seen);
 CREATE INDEX IF NOT EXISTS jobs_first_seen_date ON jobs(first_seen_date);
+CREATE TABLE IF NOT EXISTS applications (
+    job_id        TEXT PRIMARY KEY REFERENCES jobs(id),
+    status        TEXT NOT NULL DEFAULT 'queued',
+    engine        TEXT NOT NULL DEFAULT 'claude-chrome',
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+    attempts      INTEGER NOT NULL DEFAULT 0,
+    session_id    TEXT,
+    summary       TEXT,
+    page_url      TEXT,
+    screenshot    TEXT,
+    log_path      TEXT,
+    note          TEXT,
+    result_json   TEXT
+);
+CREATE INDEX IF NOT EXISTS applications_status ON applications(status);
+CREATE TABLE IF NOT EXISTS questions (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id      TEXT NOT NULL,
+    question    TEXT NOT NULL,
+    options     TEXT,
+    answer      TEXT,
+    status      TEXT NOT NULL DEFAULT 'open',
+    created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS questions_status ON questions(status);
 CREATE TABLE IF NOT EXISTS runs (
     run_id      TEXT PRIMARY KEY,
     started_at  TEXT NOT NULL,
@@ -44,6 +70,14 @@ CREATE TABLE IF NOT EXISTS runs (
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _iso() -> str:
+    return utc_now().isoformat(timespec="seconds")
+
+
+APP_STATUSES = ("queued", "running", "review_ready", "needs_answer", "needs_login", "captcha",
+                "already_applied", "failed", "submitted", "skipped")
 
 
 class Store:
@@ -128,6 +162,96 @@ class Store:
     def runs(self, limit: int = 50) -> list[dict[str, Any]]:
         rows = self.conn.execute("SELECT run_id, started_at, fetched, kept, new_jobs FROM runs ORDER BY started_at DESC LIMIT ?", (limit,)).fetchall()
         return [dict(r) for r in rows]
+
+    # ----- applications --------------------------------------------------
+    def queue_application(self, job_id: str, engine: str = "claude-chrome") -> dict[str, Any]:
+        now = _iso()
+        self.conn.execute(
+            """INSERT INTO applications (job_id, status, engine, created_at, updated_at)
+               VALUES (?, 'queued', ?, ?, ?)
+               ON CONFLICT(job_id) DO UPDATE SET status='queued', engine=excluded.engine, updated_at=excluded.updated_at""",
+            (job_id, engine, now, now))
+        self.conn.commit()
+        return self.get_application(job_id)
+
+    def update_application(self, job_id: str, **fields: Any) -> None:
+        if "status" in fields and fields["status"] not in APP_STATUSES:
+            raise ValueError(f"bad status {fields['status']}")
+        if "result" in fields:
+            fields["result_json"] = json.dumps(fields.pop("result"))
+        fields["updated_at"] = _iso()
+        cols = ", ".join(f"{k} = ?" for k in fields)
+        self.conn.execute(f"UPDATE applications SET {cols} WHERE job_id = ?", (*fields.values(), job_id))
+        self.conn.commit()
+
+    def bump_attempts(self, job_id: str) -> None:
+        self.conn.execute("UPDATE applications SET attempts = attempts + 1, updated_at = ? WHERE job_id = ?", (_iso(), job_id))
+        self.conn.commit()
+
+    def get_application(self, job_id: str) -> Optional[dict[str, Any]]:
+        row = self.conn.execute(
+            "SELECT a.*, j.job_json, j.hc_url FROM applications a JOIN jobs j ON j.id = a.job_id WHERE a.job_id = ?",
+            (job_id,)).fetchone()
+        return self._app_row(row) if row else None
+
+    def list_applications(self, status: Optional[str] = None) -> list[dict[str, Any]]:
+        sql = "SELECT a.*, j.job_json, j.hc_url FROM applications a JOIN jobs j ON j.id = a.job_id"
+        params: list[Any] = []
+        if status:
+            sql += " WHERE a.status = ?"
+            params.append(status)
+        sql += " ORDER BY a.updated_at DESC"
+        return [self._app_row(r) for r in self.conn.execute(sql, params).fetchall()]
+
+    def next_queued(self) -> Optional[dict[str, Any]]:
+        row = self.conn.execute(
+            "SELECT a.*, j.job_json, j.hc_url FROM applications a JOIN jobs j ON j.id = a.job_id "
+            "WHERE a.status = 'queued' ORDER BY a.updated_at ASC LIMIT 1").fetchone()
+        return self._app_row(row) if row else None
+
+    def application_counts(self) -> dict[str, int]:
+        rows = self.conn.execute("SELECT status, COUNT(*) FROM applications GROUP BY status").fetchall()
+        return {r[0]: r[1] for r in rows}
+
+    # ----- questions -------------------------------------------------------
+    def add_question(self, job_id: str, question: str, options: Optional[list[str]] = None) -> int:
+        cur = self.conn.execute(
+            "INSERT INTO questions (job_id, question, options, created_at) VALUES (?,?,?,?)",
+            (job_id, question, json.dumps(options) if options else None, _iso()))
+        self.conn.commit()
+        return cur.lastrowid
+
+    def answer_question(self, question_id: int, answer: str) -> Optional[dict[str, Any]]:
+        self.conn.execute("UPDATE questions SET answer = ?, status = 'answered' WHERE id = ?", (answer, question_id))
+        self.conn.commit()
+        row = self.conn.execute("SELECT * FROM questions WHERE id = ?", (question_id,)).fetchone()
+        return self._q_row(row) if row else None
+
+    def questions(self, job_id: Optional[str] = None, status: Optional[str] = None) -> list[dict[str, Any]]:
+        sql, params = "SELECT * FROM questions", []
+        clauses = []
+        if job_id:
+            clauses.append("job_id = ?"); params.append(job_id)
+        if status:
+            clauses.append("status = ?"); params.append(status)
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY id"
+        return [self._q_row(r) for r in self.conn.execute(sql, params).fetchall()]
+
+    @staticmethod
+    def _q_row(row: sqlite3.Row) -> dict[str, Any]:
+        d = dict(row)
+        d["options"] = json.loads(d["options"]) if d.get("options") else None
+        return d
+
+    @staticmethod
+    def _app_row(row: sqlite3.Row) -> dict[str, Any]:
+        d = dict(row)
+        d["job"] = json.loads(d.pop("job_json"))
+        d["result"] = json.loads(d["result_json"]) if d.get("result_json") else None
+        d.pop("result_json", None)
+        return d
 
     @staticmethod
     def _row(row: sqlite3.Row) -> dict[str, Any]:

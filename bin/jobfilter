@@ -70,7 +70,14 @@ mac_write_ui() {
 PLIST
 }
 mac_loaded() { launchctl print "$DOMAIN/$1" >/dev/null 2>&1; }
-mac_up()   { mac_loaded "$1" && launchctl bootout "$DOMAIN/$1" >/dev/null 2>&1 || true; launchctl bootstrap "$DOMAIN" "$AGENTS/$1.plist"; }
+mac_up() {
+  if mac_loaded "$1"; then launchctl bootout "$DOMAIN/$1" >/dev/null 2>&1 || true; fi
+  local i; for i in 1 2 3 4 5; do   # bootout is asynchronous; bootstrap fails with I/O error while it finishes
+    if launchctl bootstrap "$DOMAIN" "$AGENTS/$1.plist" 2>/dev/null; then return 0; fi
+    sleep 1
+  done
+  launchctl bootstrap "$DOMAIN" "$AGENTS/$1.plist"
+}
 mac_down() { if mac_loaded "$1"; then launchctl bootout "$DOMAIN/$1"; echo "$1 stopped"; else echo "$1 not running"; fi; }
 mac_status() {
   if ! mac_loaded "$1"; then echo "$1: not loaded"; return; fi

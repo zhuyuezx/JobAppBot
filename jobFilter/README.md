@@ -131,6 +131,50 @@ session (and the timer) alive after logout.
 Verified on macOS 15 and Ubuntu 22.04 / Python 3.9 (systemd user session in
 a container).
 
+## Apply engine (`apply_engine.py`)
+
+One application = one headless Claude Code run on the user's subscription:
+
+```
+claude -p "<task prompt>" --chrome --output-format stream-json --verbose \
+       --json-schema '<RESULT_SCHEMA>' --allowedTools mcp__claude-in-chrome Read \
+       --add-dir data --max-turns 120 [--resume <session_id>]
+```
+
+- `--chrome` routes browser tools through the Claude in Chrome extension, so
+  every click happens in the user's visible Chrome (tab group per session).
+  Requires the extension and a `/login` subscription session; an API key
+  disables the integration.
+- The prompt (`build_prompt`) contains the job, the profile JSON, the answer
+  bank, the resume text and path, and the rules (never Submit, don't guess,
+  stop on CAPTCHA/login). `--json-schema` forces the final answer into
+  `RESULT_SCHEMA`: `status` in {review_ready, needs_answer, needs_login,
+  captcha, already_applied, failed}, `summary`, `page_url`,
+  `unanswered_questions[]`, `screenshot_path`.
+- `stream-json` events are turned into a readable log at
+  `data/apply/<job>/log.txt` (`[claude]` text, `[tool]` calls, `[result]`).
+  The UI tails it.
+- Unanswered questions go to the `questions` table. When the user answers
+  them (UI or API), they are appended to the answer bank and the application
+  is re-queued; the worker then resumes the same session with
+  `--resume <session_id>` and a message containing the answers.
+- `ApplyWorker` is a daemon thread inside the web server that processes the
+  `applications` queue one at a time; `python -m jobFilter apply worker` runs
+  the same loop in the foreground.
+
+State machine per application:
+
+```
+queued -> running -> review_ready | needs_answer | needs_login | captcha | already_applied | failed
+needs_answer --(all questions answered)--> queued (resume)
+review_ready --(user)--> submitted;  any --(user)--> skipped;  failed --(user)--> queued
+```
+
+`JOBFILTER_CLAUDE` overrides the binary (default: `claude` on PATH, else the
+newest VS Code extension bundle), `JOBFILTER_MODEL` the model,
+`JOBFILTER_MAX_TURNS` the turn cap. Engine readiness is reported by
+`GET /api/engine` and shown as the banner in the Applications tab.
+
 ## Layout
 
 ```
@@ -143,6 +187,8 @@ jobFilter/excel.py         openpyxl writer
 jobFilter/server.py        JSON API + static page
 jobFilter/static/index.html
 jobFilter/scheduler.py     foreground interval loop
+jobFilter/profile.py       profile.json / answers.json / resume text
+jobFilter/apply_engine.py  Claude Code + Chrome runner, worker thread
 jobFilter/cli.py           argparse entry point
 bin/jobfilter              service control script
 config/                    search.json, search.template.json, SEARCH_OPTIONS.md
