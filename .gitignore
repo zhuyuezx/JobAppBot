@@ -7,3 +7,4 @@ setup/*
 !setup/README.md
 !setup/search.template.json
 !setup/profile.template.json
+.claude/
