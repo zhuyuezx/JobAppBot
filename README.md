@@ -1,28 +1,27 @@
 # JobAppBot
 
-Checks [hiring.cafe](https://hiringcafe.com) for new job postings every hour, keeps the ones that match your filters, and shows them in a small web page and an Excel sheet. No more refreshing the site by hand.
+Finds new job postings on [hiring.cafe](https://hiringcafe.com) every hour, keeps the ones that match your filters, and lets Claude fill the application forms in your own Chrome while you watch. You only click Submit.
 
-![jobFilter web UI](docs/ui.png)
+![Applications tab](docs/ui-apply.png)
 
-## How it works
+## What it does
 
 ```mermaid
 flowchart LR
-    HC[hiring.cafe] -->|every hour| F[Fetch]
-    F --> R[Your rules]
-    R --> DB[(Saved jobs)]
-    DB --> UI[Web page]
-    DB --> XL[Daily Excel]
-    C[config/search.json] -.-> F
-    C -.-> R
+    HC[hiring.cafe] -->|every hour| F[Fetch + your rules]
+    F --> DB[(Saved jobs)]
+    DB --> UI[Web page + daily Excel]
+    UI -->|Prepare| C[Claude fills the form<br/>in your Chrome]
+    C -->|stops on review page| YOU[You click Submit]
+    C -->|question it can't answer| UI
+    P[Profile + resume + answer bank] -.-> C
 ```
 
-1. **Fetch**: runs the same search you would type into hiring.cafe (search text, location, "no experience required", posted in the last 2 days, and so on).
-2. **Your rules**: drops what the site can't filter out, for example non-software roles, senior titles, or jobs that need a security clearance.
-3. **Saved jobs**: every match is stored once. A posting you already saw is never shown as new again.
-4. **Web page + Excel**: browse the last 24 hours, pick a day, or open that day's `.xlsx`.
+1. **Find**: runs your hiring.cafe search (for example "software engineer, no experience required, US, posted in the last 2 days") and drops what the site can't filter: non-software roles, senior titles, clearance jobs.
+2. **Collect**: every match is saved once. You browse them by day in the web page or in a daily Excel file.
+3. **Apply**: click *Prepare application with Claude* on a job. Claude opens the apply page in your Chrome, creates an account if needed, uploads your resume, fills every field from your profile, answers the custom questions, and stops on the review page. It never presses Submit.
 
-## Setup (macOS or Linux)
+## Setup
 
 ```bash
 git clone <this repo> && cd JobAppBot
@@ -32,7 +31,37 @@ jobfilter start                                # hourly scanning is now on
 jobfilter ui open                              # opens http://127.0.0.1:8765
 ```
 
-Needs Python 3.9 or newer.
+Works on macOS and Linux, Python 3.9 or newer.
+
+### Enable Claude in your browser (one time)
+
+1. Install the [Claude in Chrome](https://chromewebstore.google.com/detail/claude/fcoeoabgfenejglbffodgkkbkcdhcgfn) extension and sign in with your Claude account. A Pro or Max plan is enough; no API key is used.
+2. In a terminal run `claude --chrome` once and accept the prompt. This connects the extension to Claude Code.
+3. Put your resume PDF in `data/resume/`.
+4. Open the **Profile** tab in the web page and fill in what a form usually asks and a resume doesn't have: address, phone, work authorization, your sponsorship answer, EEO choices, earliest start date.
+
+The banner at the top of the **Applications** tab shows a check mark for each of these once it's ready.
+
+## Applying with Claude
+
+1. **Jobs** tab: open a job, click **Prepare application with Claude**.
+2. **Applications** tab: the job appears as *queued*, then *Claude is working*. A Chrome tab group opens and you can watch Claude click and type. The log under the job shows every step.
+3. Claude ends in one of these states:
+
+| Status | What it means | What you do |
+|---|---|---|
+| ready to submit | everything is filled, review page is open | check the screenshot or the tab, press Submit, click *Mark submitted* |
+| needs your answer | a question wasn't covered by your profile | type the answer in the card; Claude continues by itself. The answer is saved and reused next time |
+| needs login / code | an email verification code or a login wall | finish that step in the tab, then *Run again* |
+| CAPTCHA | a human check | solve it in the tab, then *Run again* |
+| already applied | the site says you applied before | nothing |
+| failed | see the log | *Run again*, or *Skip* |
+
+Applications run one at a time. Queue several and come back later.
+
+**Model**: the dropdown in the Applications banner picks which Claude model fills forms (default `opus`). *Max turns* caps how long one run may go. Both apply to the next run.
+
+**Answer bank** (Profile tab): every question you answer once is remembered. You can also add answers ahead of time, for example "Why do you want to work here?" or your salary expectation.
 
 ## Everyday commands
 
@@ -44,6 +73,7 @@ Needs Python 3.9 or newer.
 | `jobfilter excel` | Open today's Excel sheet |
 | `jobfilter stop` / `jobfilter start` | Pause / resume hourly scanning |
 | `jobfilter log` | See what the last scans did |
+| `jobfilter py apply list` | Application statuses in the terminal |
 
 ## Change what you're looking for
 
@@ -54,45 +84,18 @@ Edit `config/search.json`. It has two parts:
 
 Then run `jobfilter py validate` to check it, and `jobfilter run` to try it.
 
-## Let Claude fill the application for you
-
-The **Applications** tab in the web page hands a job to Claude, which fills the
-form inside your own Chrome window while you watch, and stops on the review
-page. You click Submit.
-
-```mermaid
-flowchart LR
-    J[Job in the list] -->|Prepare| C[Claude in your Chrome]
-    C -->|fills the form| R[Review page, you submit]
-    C -->|unknown question| Q[Asks you in the web page]
-    Q -->|your answer| C
-    P[Profile + resume + answer bank] -.-> C
-```
-
-One-time setup:
-
-1. Install the [Claude in Chrome](https://chromewebstore.google.com/detail/claude/fcoeoabgfenejglbffodgkkbkcdhcgfn) extension and sign in with your Claude account (Pro or Max plan).
-2. In a terminal run `claude --chrome` once and follow the prompt. This connects the extension to Claude Code.
-3. Put your resume PDF in `data/resume/` and fill in the **Profile** tab (address, work authorization, sponsorship answer, and so on).
-
-Then, per job: open it in the Jobs tab, click **Prepare application with Claude**,
-and switch to the Applications tab. You will see Claude's steps as they
-happen, the questions it could not answer (answer once, it remembers), and
-a screenshot of the review page when it is done. Claude pauses for logins,
-email codes and CAPTCHAs; the tab is left open for you.
-
 ## Where things go
 
 | Path | Contents |
 |---|---|
-| `data/jobs.db` | all jobs ever matched |
+| `data/jobs.db` | all jobs and applications |
 | `data/excel/2026-09-15.xlsx` | one workbook per day |
+| `data/profile/` | your profile, answer bank, resume text, model setting |
+| `data/apply/<job>/` | Claude's log and the review screenshot for each application |
 | `data/scheduler.log` | scan output |
-| `data/profile/` | your profile, answer bank, resume text |
-| `data/apply/<job>/` | Claude's log and review screenshot per application |
 
-All of `data/` stays on your machine and is not committed.
+All of `data/` stays on your machine and is not committed. Your profile is sent to Claude only when it fills a form, together with the job page.
 
 ---
 
-Technical details (how the fetch works, config reference, service internals, module layout): [jobFilter/README.md](jobFilter/README.md).
+Technical details (how the fetch works, config reference, apply engine, service internals): [jobFilter/README.md](jobFilter/README.md). Background on the automation design: [docs/APPLY_AUTOMATION.md](docs/APPLY_AUTOMATION.md).

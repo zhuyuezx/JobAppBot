@@ -109,6 +109,17 @@ vanilla-JS page.
 | `GET /api/dates` | `[{date, count}]` |
 | `GET /api/job?id=` | one row |
 | `GET /api/runs` | recent scans |
+| `GET /api/engine` | readiness, settings, counts |
+| `GET /api/applications?status=` | application queue |
+| `GET /api/application?id=` | one application with questions and log tail |
+| `POST /api/applications/queue` `{job_id}` | queue a job (starts the worker) |
+| `POST /api/applications/status` `{job_id,status,note}` | manual status change |
+| `POST /api/applications/retry` `{job_id}` | re-queue |
+| `POST /api/questions/answer` `{id,answer,save}` | answer a parked question; re-queues when none are open |
+| `GET/POST /api/profile`, `/api/settings`, `/api/answers` | profile, engine settings, answer bank |
+| `GET /api/file?path=` | screenshot/log files under `data/apply` |
+
+The page supports `#jobs`, `#apps`, `#profile` deep links.
 
 ## Background services (`bin/jobfilter`)
 
@@ -170,10 +181,17 @@ needs_answer --(all questions answered)--> queued (resume)
 review_ready --(user)--> submitted;  any --(user)--> skipped;  failed --(user)--> queued
 ```
 
-`JOBFILTER_CLAUDE` overrides the binary (default: `claude` on PATH, else the
-newest VS Code extension bundle), `JOBFILTER_MODEL` the model,
-`JOBFILTER_MAX_TURNS` the turn cap. Engine readiness is reported by
+Settings: `data/profile/settings.json` holds `model` (default `opus`; any
+Claude Code alias or model ID) and `max_turns` (default 120). They are edited
+from the Applications banner (`GET/POST /api/settings`) and read at the start
+of each run. `JOBFILTER_MODEL` / `JOBFILTER_MAX_TURNS` env vars override the
+file; `JOBFILTER_CLAUDE` overrides the binary (default: `claude` on PATH, else
+the newest VS Code extension bundle). Engine readiness is reported by
 `GET /api/engine` and shown as the banner in the Applications tab.
+
+Verified: headless `claude -p --chrome` with `--allowedTools mcp__claude-in-chrome Read`
+loads 22 browser tools (navigate, read_page, find, form_input, file_upload,
+screenshot, ...) and runs with no permission prompts.
 
 ## Layout
 

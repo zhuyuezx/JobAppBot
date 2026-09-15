@@ -330,7 +330,10 @@ $('#answers').addEventListener('click', async e => {
   await api('/api/answers/delete', { id: Number(b.dataset.del) }); loadProfile();
 });
 
-loadDates().then(load);
+function showTab(name) { const b = document.querySelector(`#tabs button[data-tab="${name}"]`); if (b) b.click(); }
+window.addEventListener('hashchange', () => showTab(location.hash.slice(1) || 'jobs'));
+$('#tabs').addEventListener('click', e => { const b = e.target.closest('button'); if (b) history.replaceState(null, '', '#' + b.dataset.tab); });
+loadDates().then(load).then(() => { if (location.hash && location.hash !== '#jobs') showTab(location.hash.slice(1)); });
 api('/api/engine').then(st => { const n = (st.counts.review_ready || 0) + (st.counts.needs_answer || 0) + (st.counts.needs_login || 0) + (st.counts.captcha || 0); $('#appsBadge').hidden = !n; $('#appsBadge').textContent = n; });
 </script>
 </body>
