@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jobFilter</title>
+<style>
+  :root { --bg:#fafafa; --fg:#1a1a1a; --muted:#6b6b6b; --line:#e3e3e3; --accent:#3b5bdb; --chip:#eef1fb; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#161616; --fg:#eaeaea; --muted:#9a9a9a; --line:#2c2c2c; --accent:#8da2fb; --chip:#232838; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  header { display:flex; flex-wrap:wrap; gap:10px; align-items:center; padding:14px 20px; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--bg); z-index:2; }
+  header h1 { font-size:16px; margin:0 12px 0 0; font-weight:650; }
+  .seg { display:flex; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+  .seg button { border:0; background:transparent; color:var(--fg); padding:6px 12px; cursor:pointer; font:inherit; }
+  .seg button.on { background:var(--accent); color:#fff; }
+  select, input[type=search] { font:inherit; padding:6px 10px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--fg); }
+  input[type=search] { min-width:220px; }
+  .count { color:var(--muted); margin-left:auto; }
+  main { padding: 8px 20px 40px; max-width:1200px; margin:0 auto; }
+  .job { border-bottom:1px solid var(--line); }
+  .row { display:grid; grid-template-columns: 1fr 200px 220px 130px; gap:12px; padding:10px 6px; cursor:pointer; align-items:baseline; }
+  .row:hover { background:var(--chip); }
+  .row .title { font-weight:600; }
+  .row .title a { color:var(--accent); text-decoration:none; }
+  .row .title a:hover { text-decoration:underline; }
+  .row .muted { color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .badge { display:inline-block; font-size:11px; padding:1px 7px; border-radius:999px; background:var(--chip); color:var(--fg); margin-left:6px; vertical-align:middle; }
+  .badge.visa { background:#d3f9d8; color:#0b5d1e; }
+  .badge.new { background:#fff3bf; color:#5c4400; }
+  .details { display:none; padding: 4px 6px 16px 6px; }
+  .job.open .details { display:block; }
+  .kv { display:grid; grid-template-columns: 140px 1fr; gap:4px 12px; margin:6px 0 10px; }
+  .kv dt { color:var(--muted); }
+  .kv dd { margin:0; }
+  .links a { display:inline-block; margin-right:14px; color:var(--accent); }
+  .empty { color:var(--muted); padding:40px 0; text-align:center; }
+  @media (max-width: 800px) { .row { grid-template-columns: 1fr; gap:2px; } .kv { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>jobFilter</h1>
+  <div class="seg" id="mode">
+    <button data-mode="24h" class="on">Last 24h</button>
+    <button data-mode="72h">Last 3 days</button>
+    <button data-mode="date">By date</button>
+    <button data-mode="all">All</button>
+  </div>
+  <select id="date" hidden></select>
+  <input id="q" type="search" placeholder="filter title / company / location">
+  <span class="count" id="count"></span>
+</header>
+<main id="list"></main>
+
+<script>
+const $ = s => document.querySelector(s);
+let mode = '24h', rows = [], dates = [];
+
+async function api(path) { const r = await fetch(path); return r.json(); }
+
+function fmt(iso) { if (!iso) return ''; return iso.slice(0, 16).replace('T', ' '); }
+function isRecent(iso) { return Date.now() - Date.parse(iso) < 24 * 3600 * 1000; }
+function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function money(a, b) { const f = n => n == null ? null : '$' + Math.round(n).toLocaleString(); const x = f(a), y = f(b); return x && y ? `${x} - ${y}` : (x || y || ''); }
+
+function render() {
+  const q = $('#q').value.trim().toLowerCase();
+  const shown = rows.filter(r => !q || [r.title, r.company, r.location].join(' ').toLowerCase().includes(q));
+  $('#count').textContent = `${shown.length} job${shown.length === 1 ? '' : 's'}` + (q ? ` (of ${rows.length})` : '');
+  if (!shown.length) { $('#list').innerHTML = '<div class="empty">Nothing here. Run <code>python -m jobFilter run</code> to fetch.</div>'; return; }
+  $('#list').innerHTML = shown.map(r => {
+    const j = r.job;
+    const link = j.apply_url || r.hc_url;
+    return `<div class="job" data-id="${esc(r.id)}">
+      <div class="row">
+        <div class="title"><a href="${esc(link)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(j.title)}</a>
+          ${j.visa_sponsorship ? '<span class="badge visa">visa</span>' : ''}${isRecent(r.first_seen) ? '<span class="badge new">new</span>' : ''}</div>
+        <div class="muted" title="${esc(j.company)}">${esc(j.company)}</div>
+        <div class="muted" title="${esc(j.location)}">${esc(j.location || '')}</div>
+        <div class="muted" title="posted">${fmt(j.published_at)}</div>
+      </div>
+      <div class="details">
+        <dl class="kv">
+          <dt>Workplace</dt><dd>${esc(j.workplace_type || '')}</dd>
+          <dt>Seniority / min YoE</dt><dd>${esc(j.seniority || '')} ${j.min_yoe != null ? '/ ' + j.min_yoe + ' yr' : ''}</dd>
+          <dt>Category</dt><dd>${esc(j.category || '')}</dd>
+          <dt>Clearance</dt><dd>${esc(j.security_clearance || '')}</dd>
+          <dt>Salary (yearly)</dt><dd>${money(j.yearly_min_comp, j.yearly_max_comp)}</dd>
+          <dt>Tools</dt><dd>${esc((j.technical_tools || []).join(', '))}</dd>
+          <dt>Requirements</dt><dd>${esc(j.requirements_summary || '')}</dd>
+          <dt>Company site</dt><dd>${esc(j.company_website || '')}</dd>
+          <dt>Source</dt><dd>${esc(j.source || '')}</dd>
+          <dt>First seen</dt><dd>${fmt(r.first_seen)} (seen ${r.seen_count}x)</dd>
+        </dl>
+        <div class="links">
+          ${j.apply_url ? `<a href="${esc(j.apply_url)}" target="_blank" rel="noopener">Apply page</a>` : ''}
+          <a href="${esc(r.hc_url)}" target="_blank" rel="noopener">hiring.cafe</a>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function load() {
+  let path = '/api/jobs';
+  if (mode === '24h') path += '?since=24';
+  else if (mode === '72h') path += '?since=72';
+  else if (mode === 'date') path += '?date=' + encodeURIComponent($('#date').value || '');
+  rows = await api(path);
+  render();
+}
+
+async function loadDates() {
+  dates = await api('/api/dates');
+  const sel = $('#date');
+  sel.innerHTML = dates.map(d => `<option value="${d.date}">${d.date} (${d.count})</option>`).join('') || '<option value="">no data</option>';
+}
+
+$('#mode').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  mode = b.dataset.mode;
+  document.querySelectorAll('#mode button').forEach(x => x.classList.toggle('on', x === b));
+  $('#date').hidden = mode !== 'date';
+  load();
+});
+$('#date').addEventListener('change', load);
+$('#q').addEventListener('input', render);
+$('#list').addEventListener('click', e => {
+  const job = e.target.closest('.job'); if (!job || e.target.closest('a')) return;
+  job.classList.toggle('open');
+});
+
+loadDates().then(load);
+</script>
+</body>
+</html>

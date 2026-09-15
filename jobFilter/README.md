@@ -1,0 +1,150 @@
+# jobFilter internals
+
+Technical companion to the top-level README.
+
+## Pipeline
+
+```mermaid
+flowchart TD
+    A[config/search.json<br/>search_state + rules] --> B[hiringcafe.py<br/>HiringCafeClient.search]
+    B -->|raw hits| C[models.py<br/>Job.from_hit]
+    C --> D[filters.py<br/>apply_rules]
+    D -->|kept| E[store.py<br/>Store.upsert_many]
+    E -->|new jobs| F[stdout list]
+    E --> G[excel.py<br/>data/excel/YYYY-MM-DD.xlsx]
+    E --> H[server.py + static/index.html<br/>http://127.0.0.1:8765]
+    S[bin/jobfilter<br/>launchd / systemd] -->|every hour| B
+```
+
+## How the fetch works
+
+hiring.cafe has no public API and sits behind a Cloudflare managed challenge
+that blocks plain `requests`/`curl`. Two things make it scriptable:
+
+1. `curl_cffi` with a Chrome TLS fingerprint (`impersonate="chrome"`) passes
+   the challenge without a browser.
+2. Search results are server-rendered by Next.js. The `searchState` JSON from
+   the site URL is sent to `/_next/data/<buildId>/index.json?searchState=...&page=N`
+   with header `x-nextjs-data: 1`; the response's `pageProps` has `ssrHits`,
+   `ssrTotalCount`, `ssrIsLastPage`. `buildId` is read from the homepage's
+   `__NEXT_DATA__` and refreshed when the data route stops answering; the
+   HTML page is the fallback.
+
+Each hit carries hiring.cafe's own enrichment under `v5_processed_job_data`:
+`job_category`, `min_industry_and_role_yoe`, `security_clearance`,
+`visa_sponsorship`, `workplace_countries`, `formatted_workplace_location`,
+`estimated_publish_date`, compensation, `technical_tools`,
+`requirements_summary`. Full descriptions are available separately from
+`/api/job-description?id=<objectID>` (`HiringCafeClient.job_description_text`,
+currently unused). Location objects come from
+`/api/searchLocation?query=<text>`.
+
+Without an explicit `locations` entry the site adds the country it guesses
+from the caller's IP, which is why the config pins the United States.
+
+## Config
+
+`config/search.json`:
+
+- `search_state`: passed to hiring.cafe verbatim (keys starting with `_` are
+  stripped). `schema.py` holds the 95 valid keys and the enumerated option
+  strings, extracted from the site's JS bundle; `python -m jobFilter validate`
+  checks a config against it. Human-readable reference:
+  [../config/SEARCH_OPTIONS.md](../config/SEARCH_OPTIONS.md).
+- `rules`: local filters in `filters.py`. Each rule is a function
+  `(Job, rules) -> rejection reason | None`; add one and append it to `RULES`.
+
+| Rule | Field used |
+|---|---|
+| `require_countries` | `workplace_countries` |
+| `require_categories` | `job_category` |
+| `title_include` / `title_exclude` | title, case-insensitive substring |
+| `max_min_yoe` | `min_industry_and_role_yoe` |
+| `exclude_security_clearance` | `security_clearance != "None"` |
+| `max_age_hours` | `estimated_publish_date_millis` |
+
+The `visa_sponsorship` flag is exposed but never filtered on: it is `false`
+for most postings, including companies that do sponsor.
+
+## Storage
+
+SQLite at `data/jobs.db` (`store.py`).
+
+- `jobs`: one row per posting that passed the rules. `id` is hiring.cafe's
+  `objectID`; `dedup_key` is its `strict_dedup_cluster_id`. A job is new only
+  if neither matches an existing row; otherwise `last_seen` and `seen_count`
+  are updated. `first_seen_date` (local date) drives the daily views.
+  `job_json` holds the normalized `Job` dict.
+- `runs`: one row per scan with fetched / kept / new counts and the search
+  state used.
+
+Daily workbook: `run` regenerates `data/excel/<today>.xlsx` from all jobs
+first seen today, so repeated scans keep one file per day.
+
+## CLI
+
+```
+python -m jobFilter run [URL] [--no-rules] [--no-store] [--new-only] [--xlsx PATH] [--max-pages N]
+python -m jobFilter validate
+python -m jobFilter list  [--since HOURS | --date YYYY-MM-DD]
+python -m jobFilter excel [--since HOURS | --date YYYY-MM-DD] [--out PATH]
+python -m jobFilter serve [--host 127.0.0.1] [--port 8765]
+python -m jobFilter schedule [--interval 3600] [--wait]
+```
+
+Bare `python -m jobFilter` is `run`. A pasted hiring.cafe URL replaces the
+config's `search_state`.
+
+## Web UI
+
+`server.py` is a stdlib `ThreadingHTTPServer`; `static/index.html` is one
+vanilla-JS page.
+
+| Endpoint | Returns |
+|---|---|
+| `GET /` | the page |
+| `GET /api/jobs?since=24` | jobs first seen in the last N hours |
+| `GET /api/jobs?date=YYYY-MM-DD` | jobs first seen that local day |
+| `GET /api/jobs` | everything |
+| `GET /api/dates` | `[{date, count}]` |
+| `GET /api/job?id=` | one row |
+| `GET /api/runs` | recent scans |
+
+## Background services (`bin/jobfilter`)
+
+The script resolves its own real path, so a symlink from anywhere works. It
+writes service definitions from the current `python3` and repo paths on every
+`start`, then hands them to the OS service manager:
+
+| | macOS | Linux |
+|---|---|---|
+| scan | `~/Library/LaunchAgents/com.jobfilter.hourly.plist`, `StartInterval` | `~/.config/systemd/user/jobfilter-scan.{service,timer}`, `OnUnitActiveSec` |
+| UI | `com.jobfilter.ui.plist`, `KeepAlive` | `jobfilter-ui.service`, `Restart=always` |
+| control | `launchctl bootstrap/bootout gui/$UID` | `systemctl --user enable/disable --now` |
+
+The scan is a short-lived process each tick (about 10 s), so its status reads
+"idle" between runs; the UI is a persistent server. The interval lives in
+`data/.interval`. `JOBFILTER_PYTHON` and `JOBFILTER_UI_PORT` override the
+interpreter and port. On Linux, `loginctl enable-linger $USER` keeps the user
+session (and the timer) alive after logout.
+
+Verified on macOS 15 and Ubuntu 22.04 / Python 3.9 (systemd user session in
+a container).
+
+## Layout
+
+```
+jobFilter/hiringcafe.py    client: Cloudflare-passing session, paging, descriptions
+jobFilter/schema.py        valid searchState keys/options, validate()
+jobFilter/models.py        Job dataclass normalized from a hit
+jobFilter/filters.py       rule functions
+jobFilter/store.py         SQLite store, dedup, date queries
+jobFilter/excel.py         openpyxl writer
+jobFilter/server.py        JSON API + static page
+jobFilter/static/index.html
+jobFilter/scheduler.py     foreground interval loop
+jobFilter/cli.py           argparse entry point
+bin/jobfilter              service control script
+config/                    search.json, search.template.json, SEARCH_OPTIONS.md
+docs/ui.png                screenshot used by the README
+```

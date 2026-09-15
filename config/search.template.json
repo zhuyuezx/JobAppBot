@@ -1,0 +1,77 @@
+{
+  "_readme": [
+    "Template for config/search.json. Copy it, delete what you don't need, keep valid JSON.",
+    "Keys starting with '_' are comments and are ignored. Full option lists: config/SEARCH_OPTIONS.md.",
+    "Easiest way to get a search_state: set filters on hiringcafe.com, copy the searchState= value from the URL, URL-decode it.",
+    "Validate with: python -m jobFilter validate"
+  ],
+  "search_state": {
+    "_searchQuery": "Free-text query, same as the site's search box.",
+    "searchQuery": "software engineer",
+
+    "_workplaceTypes": "Subset of: Remote, Hybrid, Onsite, Field. Omit for all.",
+    "workplaceTypes": ["Onsite", "Field", "Hybrid"],
+
+    "_commitmentTypes": "Subset of: Full Time, Part Time, Contract, Internship, Temporary, Seasonal, Volunteer.",
+    "commitmentTypes": ["Full Time"],
+
+    "_seniorityLevel": "Subset of: No Prior Experience Required, Entry Level, Mid Level, Senior Level.",
+    "seniorityLevel": ["No Prior Experience Required"],
+
+    "_dateFetchedPastNDays": "Number of days since hiring.cafe fetched the posting (1 = today, 2, 3, 7, 14, 30...). Site default 121. Also accepts {\"from\": \"2026-09-01\", \"to\": \"2026-09-15\"}.",
+    "dateFetchedPastNDays": 2,
+
+    "_locations": "List of place objects from https://hiringcafe.com/api/searchLocation?query=<text> (use the placeDetail part). The one below is the site's built-in 'United States'. Omit entirely to let hiring.cafe pick your country from your IP.",
+    "locations": [
+      {
+        "formatted_address": "United States",
+        "types": ["country"],
+        "geometry": {"location": {"lat": 0, "lon": 0}},
+        "id": "user_country",
+        "address_components": [{"long_name": "United States", "short_name": "US", "types": ["country"]}],
+        "options": {"flexible_regions": ["anywhere_in_continent", "anywhere_in_world"]}
+      }
+    ],
+    "_excludedWorkplaceLocations": "Same shape as locations; jobs there are dropped.",
+
+    "_roleYoeRange": "[min, max] years of role experience; max 20 means 20+. Default [0, 20].",
+    "_excludeIfRoleYoeIsNotSpecified": "true drops postings that don't state years of experience.",
+    "_securityClearances": "Subset of: None, Confidential, Secret, Top Secret, Top Secret/SCI, Public Trust, Interim Clearances, Other. ['None'] = only jobs with no clearance.",
+    "_roleTypes": "Subset of: Individual Contributor, People Manager.",
+    "_benefitsAndPerks": "Subset of: Generous Paid Time Off, Four Day Work Week, 401k Matching, Generous Parental Leave, Retirement Plan, Tuition Reimbursement, Visa Sponsorship, Relocation Assistance. 'Visa Sponsorship' has many false negatives.",
+    "_applicationFormEase": "Subset of: Simple, Time Consuming.",
+    "_jobTitleQuery": "Text that must appear in the title. _jobDescriptionQuery / _technologyKeywordsQuery / _requirementsKeywordsQuery work the same on other fields.",
+    "_companyNames / _excludedCompanyNames": "Lists of company names (as shown on the site).",
+    "_industries / _excludedIndustries / _departments": "Lists of the site's industry / department labels.",
+    "_companyKeywords / _excludedCompanyKeywords": "Free text lists; companyKeywordsBooleanOperator OR|AND.",
+    "_companyHqCountries / _excludedCompanyHqCountries": "Country names.",
+    "_organizationTypes": "Subset of: private, public, non-profit, government, cooperative / mutual.",
+    "_companySizeRanges": "List of [min, max] headcount pairs, e.g. [[1, 50], [51, 200]].",
+    "_minYearFounded / _maxYearFounded": "Integers.",
+    "_compensation": "currency {\"label\":\"USD\",\"value\":\"USD\"}, frequency {\"label\":\"Yearly\",\"value\":\"Yearly\"}, minCompensationLowEnd / minCompensationHighEnd / maxCompensationLowEnd / maxCompensationHighEnd numbers, restrictJobsToTransparentSalaries true|false.",
+    "_degree": "associatesDegreeRequirements / bachelorsDegreeRequirements / mastersDegreeRequirements / doctorateDegreeRequirements: subset of Required, Preferred, Not Mentioned. *FieldsOfStudy: lists of field names.",
+    "_languageRequirements": "List of languages; languageRequirementsOperator OR|AND; excludeJobsWithAdditionalLanguageRequirements true|false.",
+    "_work_conditions": "physicalEnvironments (Office, Outdoor, Vehicle, Industrial, Customer-Facing); physicalLaborIntensity / oralCommunicationLevels / computerUsageLevels / cognitiveDemandLevels (Low, Medium, High); physicalPositions (Sitting, Standing); airTravelRequirement / landTravelRequirement (None, Minimal, Moderate, Extensive); morningShiftWork / eveningShiftWork / overnightShiftWork (Required, Optional, Not Indicated); onCallRequirements (None, Occasional (once a month or less), Regular (once a week or more)); weekendAvailabilityRequired / holidayAvailabilityRequired / overtimeRequired (Doesn't Matter, Yes, No).",
+    "_encouragedToApply": "Subset of: Military Veterans, Fair Chance.",
+    "_sortBy": "default (relevance), date (newest), date_asc, compensation_desc, compensation_asc, experience_asc, experience_desc. resume_match_desc / personalization_desc need a logged-in account.",
+    "_account_only": "hideJobTypes (Hidden, Saved, Applied, Viewed), degenMode, degenModeCategories, activitySignals need a hiring.cafe login and do nothing here."
+  },
+
+  "rules": {
+    "_readme": "Applied locally after fetching. Every rule is optional; remove it or set null to disable.",
+    "_require_countries": "Job must list at least one of these ISO country codes (from the posting's workplace_countries).",
+    "require_countries": ["US"],
+    "_require_categories": "hiring.cafe job_category must be one of these. Seen values: Software Development, Engineering, Quality Assurance, Information Technology, Research and Development (R&D), Data and Analytics, Customer Service, Project and Program Management, ...",
+    "require_categories": ["Software Development"],
+    "_title_include": "Title must contain at least one of these (case-insensitive).",
+    "title_include": ["software", "engineer", "developer", "sde", "swe", "programmer"],
+    "_title_exclude": "Title must contain none of these.",
+    "title_exclude": ["senior", "sr.", "sr ", "staff", "principal", "lead", "manager", "director", "intern", "co-op", "coop", "contract", "clearance"],
+    "_max_min_yoe": "Drop if the posting's minimum years of experience is above this.",
+    "max_min_yoe": 1,
+    "_exclude_security_clearance": "Drop postings that need any security clearance.",
+    "exclude_security_clearance": true,
+    "_max_age_hours": "Drop postings whose estimated publish date is older than this many hours. null = off.",
+    "max_age_hours": null
+  }
+}

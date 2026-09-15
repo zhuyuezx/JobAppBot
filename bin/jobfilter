@@ -1,0 +1,254 @@
+#!/usr/bin/env bash
+# jobfilter: control the hourly hiring.cafe scan and the local UI from anywhere.
+#
+#   jobfilter start|stop|restart|status     hourly scan (macOS launchd / Linux systemd --user)
+#   jobfilter run                           one scan right now
+#   jobfilter log [-f]                      scan log
+#   jobfilter ui start|stop|status|open     local web UI (background service, http://127.0.0.1:8765)
+#   jobfilter excel [YYYY-MM-DD]            open that day's workbook (default today)
+#   jobfilter py <args>                     pass through to `python -m jobFilter <args>`
+#   jobfilter interval <seconds>            change the scan interval (default 3600) and restart
+#
+# Windows: use `python -m jobFilter schedule` or Task Scheduler (see README).
+set -euo pipefail
+
+SELF="$(python3 -c 'import os,sys;print(os.path.realpath(sys.argv[1]))' "$0")"
+REPO="$(cd "$(dirname "$SELF")/.." && pwd)"
+PY="${JOBFILTER_PYTHON:-$(command -v python3)}"
+DATA="$REPO/data"
+UI_PORT="${JOBFILTER_UI_PORT:-8765}"
+INTERVAL_FILE="$DATA/.interval"
+OS="$(uname -s)"
+
+mkdir -p "$DATA"
+interval() { cat "$INTERVAL_FILE" 2>/dev/null || echo 3600; }
+usage() { sed -n '2,13p' "$SELF"; }
+open_url() { if [ "$OS" = "Darwin" ]; then open "$1"; else xdg-open "$1" >/dev/null 2>&1 || echo "$1"; fi; }
+
+# =====================================================================
+# macOS: launchd agents in ~/Library/LaunchAgents
+# =====================================================================
+SCAN_LABEL="com.jobfilter.hourly"
+UI_LABEL="com.jobfilter.ui"
+AGENTS="$HOME/Library/LaunchAgents"
+DOMAIN="gui/$(id -u)"
+
+mac_write_scan() {
+  mkdir -p "$AGENTS"
+  cat > "$AGENTS/$SCAN_LABEL.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>$SCAN_LABEL</string>
+  <key>ProgramArguments</key><array>
+    <string>$PY</string><string>-m</string><string>jobFilter</string><string>run</string><string>--new-only</string>
+  </array>
+  <key>WorkingDirectory</key><string>$REPO</string>
+  <key>StartInterval</key><integer>$(interval)</integer>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>$DATA/scheduler.log</string>
+  <key>StandardErrorPath</key><string>$DATA/scheduler.log</string>
+</dict></plist>
+PLIST
+}
+mac_write_ui() {
+  mkdir -p "$AGENTS"
+  cat > "$AGENTS/$UI_LABEL.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>$UI_LABEL</string>
+  <key>ProgramArguments</key><array>
+    <string>$PY</string><string>-m</string><string>jobFilter</string><string>serve</string><string>--port</string><string>$UI_PORT</string>
+  </array>
+  <key>WorkingDirectory</key><string>$REPO</string>
+  <key>KeepAlive</key><true/>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>$DATA/ui.log</string>
+  <key>StandardErrorPath</key><string>$DATA/ui.log</string>
+</dict></plist>
+PLIST
+}
+mac_loaded() { launchctl print "$DOMAIN/$1" >/dev/null 2>&1; }
+mac_up()   { mac_loaded "$1" && launchctl bootout "$DOMAIN/$1" >/dev/null 2>&1 || true; launchctl bootstrap "$DOMAIN" "$AGENTS/$1.plist"; }
+mac_down() { if mac_loaded "$1"; then launchctl bootout "$DOMAIN/$1"; echo "$1 stopped"; else echo "$1 not running"; fi; }
+mac_status() {
+  if ! mac_loaded "$1"; then echo "$1: not loaded"; return; fi
+  local info state pid exit
+  info="$(launchctl print "$DOMAIN/$1")"
+  state="$(echo "$info" | awk -F'= ' '/^\tstate = /{print $2}')"
+  pid="$(echo "$info"   | awk -F'= ' '/^\tpid = /{print $2}')"
+  exit="$(echo "$info"  | awk -F'= ' '/last exit code = /{print $2}')"
+  if [ "$1" = "$SCAN_LABEL" ]; then
+    # StartInterval jobs only run for a few seconds each tick; "not running" means idle between scans.
+    if [ "$state" = "running" ]; then echo "$1: scheduled every $(interval)s, scanning now (pid $pid)"
+    else echo "$1: scheduled every $(interval)s, idle (last scan exit=${exit:-?}, 0 = ok)"; fi
+  else
+    echo "$1: loaded, state=${state:-?}${pid:+, pid=$pid}${exit:+, last exit=$exit}"
+  fi
+}
+
+# =====================================================================
+# Linux: systemd --user units in ~/.config/systemd/user
+# =====================================================================
+UNIT_DIR="$HOME/.config/systemd/user"
+SCAN_UNIT="jobfilter-scan"
+UI_UNIT="jobfilter-ui"
+
+sd() { systemctl --user "$@"; }
+sd_write_scan() {
+  mkdir -p "$UNIT_DIR"
+  cat > "$UNIT_DIR/$SCAN_UNIT.service" <<UNIT
+[Unit]
+Description=jobFilter hiring.cafe scan
+
+[Service]
+Type=oneshot
+WorkingDirectory=$REPO
+ExecStart=$PY -m jobFilter run --new-only
+StandardOutput=append:$DATA/scheduler.log
+StandardError=append:$DATA/scheduler.log
+UNIT
+  cat > "$UNIT_DIR/$SCAN_UNIT.timer" <<UNIT
+[Unit]
+Description=Run jobFilter scan every $(interval) seconds
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=$(interval)s
+Unit=$SCAN_UNIT.service
+
+[Install]
+WantedBy=timers.target
+UNIT
+  sd daemon-reload
+}
+sd_write_ui() {
+  mkdir -p "$UNIT_DIR"
+  cat > "$UNIT_DIR/$UI_UNIT.service" <<UNIT
+[Unit]
+Description=jobFilter local web UI
+
+[Service]
+WorkingDirectory=$REPO
+ExecStart=$PY -m jobFilter serve --port $UI_PORT
+Restart=always
+StandardOutput=append:$DATA/ui.log
+StandardError=append:$DATA/ui.log
+
+[Install]
+WantedBy=default.target
+UNIT
+  sd daemon-reload
+}
+sd_scan_status() {
+  if sd is-enabled "$SCAN_UNIT.timer" >/dev/null 2>&1 || sd is-active "$SCAN_UNIT.timer" >/dev/null 2>&1; then
+    local res; res="$(sd show "$SCAN_UNIT.service" -p Result --value 2>/dev/null || true)"
+    echo "$SCAN_UNIT.timer: scheduled every $(interval)s, last scan result ${res:-?} (success = ok)"
+  else
+    echo "$SCAN_UNIT.timer: not enabled"
+  fi
+}
+
+# =====================================================================
+# Cross-platform bits
+# =====================================================================
+last_runs() {
+  [ -f "$DATA/jobs.db" ] || { echo "no scans yet"; return; }
+  "$PY" - "$DATA/jobs.db" "$1" <<'PYEOF'
+import signal, sqlite3, sys
+from datetime import datetime, timedelta, timezone
+signal.signal(signal.SIGPIPE, signal.SIG_DFL)  # quiet exit when piped into head
+c = sqlite3.connect(sys.argv[1])
+total = c.execute("select count(*) from jobs").fetchone()[0]
+today = c.execute("select count(*) from jobs where first_seen_date = date('now','localtime')").fetchone()[0]
+print(f"db: {total} jobs total, {today} first seen today")
+runs = c.execute("select run_id, started_at, fetched, kept, new_jobs from runs order by started_at desc limit 3").fetchall()
+for run_id, started, fetched, kept, new in runs:
+    local = datetime.fromisoformat(started).astimezone().strftime("%Y-%m-%d %H:%M")
+    print(f"  {local}  fetched={fetched} kept={kept} new={new}")
+if runs and sys.argv[2]:
+    nxt = datetime.fromisoformat(runs[0][1]) + timedelta(seconds=int(sys.argv[2]))
+    print(f"next scan ~ {nxt.astimezone():%H:%M}" if nxt > datetime.now(timezone.utc) else "next scan: due now")
+PYEOF
+}
+
+scan_active() {
+  case "$OS" in
+    Darwin) mac_loaded "$SCAN_LABEL" ;;
+    Linux)  sd is-active "$SCAN_UNIT.timer" >/dev/null 2>&1 ;;
+    *) return 1 ;;
+  esac
+}
+need_service_os() {
+  case "$OS" in Darwin|Linux) ;; *) echo "background services are macOS/Linux only here; use: python -m jobFilter schedule"; exit 1 ;; esac
+  if [ "$OS" = "Linux" ] && ! command -v systemctl >/dev/null; then echo "systemd not found; use: python -m jobFilter schedule"; exit 1; fi
+}
+
+scan_start() {
+  need_service_os
+  if [ "$OS" = "Darwin" ]; then mac_write_scan; mac_up "$SCAN_LABEL"
+  else sd_write_scan; sd enable --now "$SCAN_UNIT.timer" >/dev/null 2>&1; sd start "$SCAN_UNIT.service" --no-block; fi
+  echo "hourly scan started (every $(interval)s, runs once now). log: jobfilter log"
+}
+scan_stop() {
+  need_service_os
+  if [ "$OS" = "Darwin" ]; then mac_down "$SCAN_LABEL"
+  else sd disable --now "$SCAN_UNIT.timer" >/dev/null 2>&1 && echo "$SCAN_UNIT.timer stopped" || echo "$SCAN_UNIT.timer not running"; fi
+}
+ui_start() {
+  need_service_os
+  if [ "$OS" = "Darwin" ]; then mac_write_ui; mac_up "$UI_LABEL"
+  else sd_write_ui; sd enable --now "$UI_UNIT.service" >/dev/null 2>&1; fi
+  echo "ui: http://127.0.0.1:$UI_PORT"
+}
+ui_stop() {
+  need_service_os
+  if [ "$OS" = "Darwin" ]; then mac_down "$UI_LABEL"
+  else sd disable --now "$UI_UNIT.service" >/dev/null 2>&1 && echo "$UI_UNIT stopped" || echo "$UI_UNIT not running"; fi
+}
+ui_status() {
+  case "$OS" in
+    Darwin) mac_status "$UI_LABEL" ;;
+    Linux)  echo "$UI_UNIT: $(sd is-active "$UI_UNIT.service" 2>/dev/null || echo inactive)" ;;
+    *) echo "ui: run manually with: python -m jobFilter serve" ;;
+  esac
+}
+ui_loaded() {
+  case "$OS" in
+    Darwin) mac_loaded "$UI_LABEL" ;;
+    Linux)  sd is-active "$UI_UNIT.service" >/dev/null 2>&1 ;;
+    *) return 1 ;;
+  esac
+}
+
+cmd="${1:-status}"; shift || true
+case "$cmd" in
+  start)    scan_start ;;
+  stop)     scan_stop ;;
+  restart)  scan_stop >/dev/null || true; scan_start ;;
+  status)
+    case "$OS" in
+      Darwin) mac_status "$SCAN_LABEL" ;;
+      Linux)  sd_scan_status ;;
+      *)      echo "scan: no background service on $OS (use python -m jobFilter schedule)" ;;
+    esac
+    ui_status
+    last_runs "$(scan_active && interval || true)" ;;
+  run)      (cd "$REPO" && "$PY" -m jobFilter run --new-only "$@") ;;
+  log)      touch "$DATA/scheduler.log"; if [ "${1:-}" = "-f" ]; then tail -f "$DATA/scheduler.log"; else tail -n 40 "$DATA/scheduler.log"; fi ;;
+  interval) [ -n "${1:-}" ] || { echo "usage: jobfilter interval <seconds>"; exit 1; }; echo "$1" > "$INTERVAL_FILE"
+            if scan_active; then scan_stop >/dev/null; scan_start >/dev/null; fi; echo "interval set to $1s" ;;
+  ui)
+    case "${1:-open}" in
+      start)  ui_start ;;
+      stop)   ui_stop ;;
+      status) ui_status ;;
+      open)   ui_loaded || { ui_start; sleep 1; }; open_url "http://127.0.0.1:$UI_PORT" ;;
+      *) echo "usage: jobfilter ui start|stop|status|open"; exit 1 ;;
+    esac ;;
+  excel)    f="$DATA/excel/${1:-$(date +%Y-%m-%d)}.xlsx"; [ -f "$f" ] && open_url "$f" || echo "no workbook: $f" ;;
+  py)       (cd "$REPO" && "$PY" -m jobFilter "$@") ;;
+  -h|--help|help) usage ;;
+  *) echo "unknown command: $cmd"; usage; exit 1 ;;
+esac
