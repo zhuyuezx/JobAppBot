@@ -174,6 +174,28 @@ def reflow_resume(raw: str) -> str:
     return "\n".join(out)
 
 
+# ----- engine settings -----------------------------------------------------
+def load_settings() -> dict[str, Any]:
+    data = dict(DEFAULT_SETTINGS)
+    if SETTINGS_PATH.exists():
+        try:
+            data.update(json.loads(SETTINGS_PATH.read_text()))
+        except ValueError:
+            pass
+    return data
+
+
+def save_settings(updates: dict[str, Any]) -> dict[str, Any]:
+    data = load_settings()
+    if "model" in updates:
+        data["model"] = str(updates["model"]).strip() or DEFAULT_SETTINGS["model"]
+    if "max_turns" in updates:
+        data["max_turns"] = max(10, min(400, int(updates["max_turns"])))
+    PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+    SETTINGS_PATH.write_text(json.dumps(data, indent=2) + "\n")
+    return data
+
+
 def status() -> dict[str, Any]:
     p = resume_path()
     return {
