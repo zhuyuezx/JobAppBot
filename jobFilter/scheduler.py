@@ -22,7 +22,7 @@ def run_once(config: Path) -> int:
 
 
 def run_forever(interval: int = 3600, config: Path | None = None, run_immediately: bool = True) -> None:
-    config = config or Path(__file__).resolve().parent.parent / "config" / "search.json"
+    config = config or Path(__file__).resolve().parent.parent / "setup" / "search.json"
     if not run_immediately:
         time.sleep(interval)
     while True:

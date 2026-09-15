@@ -6,7 +6,7 @@ Technical companion to the top-level README.
 
 ```mermaid
 flowchart TD
-    A[config/search.json<br/>search_state + rules] --> B[hiringcafe.py<br/>HiringCafeClient.search]
+    A[setup/search.json<br/>search_state + rules] --> B[hiringcafe.py<br/>HiringCafeClient.search]
     B -->|raw hits| C[models.py<br/>Job.from_hit]
     C --> D[filters.py<br/>apply_rules]
     D -->|kept| E[store.py<br/>Store.upsert_many]
@@ -44,13 +44,13 @@ from the caller's IP, which is why the config pins the United States.
 
 ## Config
 
-`config/search.json`:
+`setup/search.json`:
 
 - `search_state`: passed to hiring.cafe verbatim (keys starting with `_` are
   stripped). `schema.py` holds the 95 valid keys and the enumerated option
   strings, extracted from the site's JS bundle; `python -m jobFilter validate`
   checks a config against it. Human-readable reference:
-  [../config/SEARCH_OPTIONS.md](../config/SEARCH_OPTIONS.md).
+  [../docs/SEARCH_OPTIONS.md](../docs/SEARCH_OPTIONS.md).
 - `rules`: local filters in `filters.py`. Each rule is a function
   `(Job, rules) -> rejection reason | None`; add one and append it to `RULES`.
 
@@ -156,12 +156,21 @@ claude -p "<task prompt>" --chrome --output-format stream-json --verbose \
   every click happens in the user's visible Chrome (tab group per session).
   Requires the extension and a `/login` subscription session; an API key
   disables the integration.
-- The prompt (`build_prompt`) contains the job, the profile JSON, the answer
-  bank, the resume text and path, and the rules (never Submit, don't guess,
-  stop on CAPTCHA/login). `--json-schema` forces the final answer into
+- The prompt (`build_prompt`) contains the job, the full text of the
+  `apply-job` skill (`.claude/skills/apply-job/SKILL.md`: workflow, per-site
+  notes, learned lessons), the profile JSON, the answer bank, the resume text
+  and path, and the user's rules (never Submit, don't guess, stop on
+  CAPTCHA/login). The skill is also discoverable by interactive Claude Code
+  sessions in this repo. `--json-schema` forces the final answer into
   `RESULT_SCHEMA`: `status` in {review_ready, needs_answer, needs_login,
   captcha, already_applied, failed}, `summary`, `page_url`,
   `unanswered_questions[]`, `screenshot_path`.
+- The result's `lessons[]` (new reusable facts about the site) are appended to
+  the skill's "Learned from runs" section with date and company; exact
+  duplicates are skipped, paraphrases are not, so prune by hand occasionally.
+- The screenshot Claude reports (a temp jpg from the extension) is copied by
+  the engine into `data/apply/<job>/review.*`; Claude is told not to copy
+  files itself because headless runs have no Bash permission.
 - `stream-json` events are turned into a readable log at
   `data/apply/<job>/log.txt` (`[claude]` text, `[tool]` calls, `[result]`).
   The UI tails it.
@@ -205,10 +214,12 @@ jobFilter/excel.py         openpyxl writer
 jobFilter/server.py        JSON API + static page
 jobFilter/static/index.html
 jobFilter/scheduler.py     foreground interval loop
-jobFilter/profile.py       profile.json / answers.json / resume text
+jobFilter/profile.py       setup/profile.json, setup/answers.json, resume text
+.claude/skills/apply-job/  the form-filling skill Claude follows and extends
+setup/                     user setup (gitignored) + tracked templates
 jobFilter/apply_engine.py  Claude Code + Chrome runner, worker thread
 jobFilter/cli.py           argparse entry point
 bin/jobfilter              service control script
-config/                    search.json, search.template.json, SEARCH_OPTIONS.md
+docs/                      SEARCH_OPTIONS.md, design notes, screenshots
 docs/ui.png                screenshot used by the README
 ```

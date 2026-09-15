@@ -1,5 +1,5 @@
 {
-  "_readme": "Copy to data/profile/profile.json (or edit in the web UI, Profile tab). Everything here is handed to Claude when it fills a form. Leave a value empty if you don't want it used. EEO fields accept a value or \"decline\".",
+  "_readme": "Copy to setup/profile.json next to this file (or just open the Profile tab in the web UI, which creates it). Everything here is handed to Claude when it fills a form. Leave a value empty if you don't want it used. EEO fields accept a value or \"decline\".",
   "identity": {
     "first_name": "", "last_name": "", "preferred_name": "",
     "email": "", "phone": "",

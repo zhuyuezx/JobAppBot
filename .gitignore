@@ -2,3 +2,8 @@ __pycache__/
 *.pyc
 .venv/
 data/
+# personal setup: only the templates and the folder README are tracked
+setup/*
+!setup/README.md
+!setup/search.template.json
+!setup/profile.template.json

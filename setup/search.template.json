@@ -1,7 +1,7 @@
 {
   "_readme": [
-    "Template for config/search.json. Copy it, delete what you don't need, keep valid JSON.",
-    "Keys starting with '_' are comments and are ignored. Full option lists: config/SEARCH_OPTIONS.md.",
+    "Template for search.json in this folder. Copy it to setup/search.json, delete what you don't need, keep valid JSON.",
+    "Keys starting with '_' are comments and are ignored. Full option lists: docs/SEARCH_OPTIONS.md.",
     "Easiest way to get a search_state: set filters on hiringcafe.com, copy the searchState= value from the URL, URL-decode it.",
     "Validate with: python -m jobFilter validate"
   ],

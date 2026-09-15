@@ -3,7 +3,7 @@
 Extracted from hiring.cafe's frontend bundle (September 2026). These are the
 keys the site itself serializes into `?searchState=` and the exact option
 strings it uses. `python -m jobFilter validate` checks a config against this
-list; the machine-readable copy is `jobFilter/schema.py`.
+list; the machine-readable copy is `jobFilter/schema.py`. Template: `setup/search.template.json`.
 
 A key that is omitted takes the site default (shown in parentheses).
 

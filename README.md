@@ -33,12 +33,22 @@ jobfilter ui open                              # opens http://127.0.0.1:8765
 
 Works on macOS and Linux, Python 3.9 or newer.
 
+Everything personal lives in one folder, `setup/`, so your search, profile,
+answers and resume are in one place. They are gitignored; only the templates are tracked:
+
+| File | What | Start from |
+|---|---|---|
+| `setup/search.json` | the hiring.cafe search and your rules | `setup/search.template.json` |
+| `setup/profile.json` | facts Claude uses to fill forms | `setup/profile.template.json` |
+| `setup/answers.json` | answer bank, grows as you answer questions | empty |
+| `setup/resume/*.pdf` | the resume to upload | |
+
 ### Enable Claude in your browser (one time)
 
 1. Install the [Claude in Chrome](https://chromewebstore.google.com/detail/claude/fcoeoabgfenejglbffodgkkbkcdhcgfn) extension and sign in with your Claude account. A Pro or Max plan is enough; no API key is used.
 2. In a terminal run `claude --chrome` once and accept the prompt. This connects the extension to Claude Code.
-3. Put your resume PDF in `data/resume/`.
-4. Open the **Profile** tab in the web page and fill in what a form usually asks and a resume doesn't have: address, phone, work authorization, your sponsorship answer, EEO choices, earliest start date.
+3. Put your resume PDF in `setup/resume/`.
+4. Open the **Profile** tab in the web page (it edits `setup/profile.json`) and fill in what a form usually asks and a resume doesn't have: address, phone, work authorization, your sponsorship answer, EEO choices, earliest start date.
 
 The banner at the top of the **Applications** tab shows a check mark for each of these once it's ready.
 
@@ -63,6 +73,8 @@ Applications run one at a time. Queue several and come back later.
 
 **Answer bank** (Profile tab): every question you answer once is remembered. You can also add answers ahead of time, for example "Why do you want to work here?" or your salary expectation.
 
+**The skill learns.** How to handle each application system (Eightfold, Workday, Greenhouse, ...) is written down in [.claude/skills/apply-job/SKILL.md](.claude/skills/apply-job/SKILL.md). Claude reads it before every run, and after each run it appends anything new it found out about that site to the "Learned from runs" section. Skim that section now and then and fold recurring notes into the site sections.
+
 ## Everyday commands
 
 | Command | What it does |
@@ -77,9 +89,9 @@ Applications run one at a time. Queue several and come back later.
 
 ## Change what you're looking for
 
-Edit `config/search.json`. It has two parts:
+Edit `setup/search.json`. It has two parts:
 
-- **search_state**: the hiring.cafe search itself. Easiest way to change it: set your filters on hiring.cafe, copy the `searchState=` part of the URL, and paste it in. [config/search.template.json](config/search.template.json) explains every option.
+- **search_state**: the hiring.cafe search itself. Easiest way to change it: set your filters on hiring.cafe, copy the `searchState=` part of the URL, and paste it in. [setup/search.template.json](setup/search.template.json) explains every option.
 - **rules**: your extra filters (title words to keep or drop, max years of experience, skip clearance jobs, ...).
 
 Then run `jobfilter py validate` to check it, and `jobfilter run` to try it.
@@ -90,7 +102,8 @@ Then run `jobfilter py validate` to check it, and `jobfilter run` to try it.
 |---|---|
 | `data/jobs.db` | all jobs and applications |
 | `data/excel/2026-09-15.xlsx` | one workbook per day |
-| `data/profile/` | your profile, answer bank, resume text, model setting |
+| `setup/` | your search, profile, answer bank, resume (gitignored, templates tracked) |
+| `data/profile/` | resume text cache, model setting |
 | `data/apply/<job>/` | Claude's log and the review screenshot for each application |
 | `data/scheduler.log` | scan output |
 

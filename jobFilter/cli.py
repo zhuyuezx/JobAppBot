@@ -1,7 +1,7 @@
 """Commands:
 
     python -m jobFilter run [URL] [--no-store] [--xlsx PATH]   fetch -> rules -> store -> print list -> daily excel
-    python -m jobFilter validate                               check config/search.json against hiring.cafe's schema
+    python -m jobFilter validate                               check setup/search.json against hiring.cafe's schema
     python -m jobFilter list [--since 24 | --date YYYY-MM-DD]  read back from the local db
     python -m jobFilter excel [--date YYYY-MM-DD | --since 24] [--out PATH]
     python -m jobFilter serve [--port 8765]                    local web UI
@@ -24,7 +24,7 @@ from jobFilter.hiringcafe import HiringCafeClient, HiringCafeError
 from jobFilter.models import Job
 
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_CONFIG = ROOT / "config" / "search.json"
+DEFAULT_CONFIG = ROOT / "setup" / "search.json"
 DATA_DIR = ROOT / "data"
 DB_PATH = DATA_DIR / "jobs.db"
 EXCEL_DIR = DATA_DIR / "excel"

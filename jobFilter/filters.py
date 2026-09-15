@@ -1,7 +1,7 @@
 """Rule-based filtering on top of hiring.cafe's own search filters.
 
 Each rule returns a rejection reason string, or None when the job passes.
-Rules are configured under the `rules` key of config/search.json.
+Rules are configured under the `rules` key of setup/search.json.
 """
 from __future__ import annotations
 

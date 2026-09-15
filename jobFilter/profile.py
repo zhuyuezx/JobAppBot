@@ -1,10 +1,11 @@
 """Applicant profile, answer bank and resume access for the apply engine.
 
-Files (all under data/, gitignored):
-    data/profile/profile.json   structured facts, see config/profile.template.json
-    data/profile/answers.json   [{id, question, answer, updated}] reused across applications
-    data/profile/resume.txt     cached text extraction of the resume
-    data/resume/*.pdf           the file to upload (newest is used)
+Files:
+    setup/profile.json          structured facts, see setup/profile.template.json   (committed)
+    setup/answers.json          [{id, question, answer, updated}] reused across applications (committed)
+    setup/resume/*.pdf          the file to upload; newest is used                   (committed)
+    data/profile/resume.txt     cached text extraction of the resume                 (local)
+    data/profile/settings.json  engine settings such as the model                    (local)
 """
 from __future__ import annotations
 
@@ -15,15 +16,16 @@ from pathlib import Path
 from typing import Any, Optional
 
 ROOT = Path(__file__).resolve().parent.parent
-PROFILE_DIR = ROOT / "data" / "profile"
-PROFILE_PATH = PROFILE_DIR / "profile.json"
-ANSWERS_PATH = PROFILE_DIR / "answers.json"
+SETUP_DIR = ROOT / "setup"
+PROFILE_DIR = ROOT / "data" / "profile"          # local caches and settings
+PROFILE_PATH = SETUP_DIR / "profile.json"
+ANSWERS_PATH = SETUP_DIR / "answers.json"
 RESUME_TEXT_PATH = PROFILE_DIR / "resume.txt"
-RESUME_DIR = ROOT / "data" / "resume"
+RESUME_DIR = SETUP_DIR / "resume"
 SETTINGS_PATH = PROFILE_DIR / "settings.json"
 DEFAULT_SETTINGS: dict[str, Any] = {"model": "opus", "max_turns": 120}
 MODEL_CHOICES = ["opus", "sonnet", "haiku"]
-TEMPLATE_PATH = ROOT / "config" / "profile.template.json"
+TEMPLATE_PATH = SETUP_DIR / "profile.template.json"
 
 
 def _strip(obj: Any) -> Any:
@@ -46,7 +48,7 @@ def profile_exists() -> bool:
 
 
 def save_profile(profile: dict[str, Any]) -> None:
-    PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+    SETUP_DIR.mkdir(parents=True, exist_ok=True)
     PROFILE_PATH.write_text(json.dumps(profile, indent=2, ensure_ascii=False) + "\n")
 
 
@@ -65,7 +67,7 @@ def load_answers() -> list[dict[str, Any]]:
 
 
 def save_answers(answers: list[dict[str, Any]]) -> None:
-    PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+    SETUP_DIR.mkdir(parents=True, exist_ok=True)
     ANSWERS_PATH.write_text(json.dumps(answers, indent=2, ensure_ascii=False) + "\n")
 
 
