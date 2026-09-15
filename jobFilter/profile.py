@@ -120,32 +120,58 @@ def resume_text(refresh: bool = False) -> str:
     except ImportError:
         return ""
     doc = fitz.open(path)
-    text = "\n".join(page.get_text() for page in doc)
+    text = reflow_resume("\n".join(page.get_text() for page in doc))
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)
     RESUME_TEXT_PATH.write_text(text)
     return text
 
 
-# ----- engine settings -----------------------------------------------------
-def load_settings() -> dict[str, Any]:
-    data = dict(DEFAULT_SETTINGS)
-    if SETTINGS_PATH.exists():
-        try:
-            data.update(json.loads(SETTINGS_PATH.read_text()))
-        except ValueError:
-            pass
-    return data
+_BULLET_RE = re.compile(r"^(?:[\uf09f\uf0b7\u2022\u25cf\u25aa\u2023\u2043\u00b7\u25e6\u2219]|[-*o](?=\s|$))\s*(.*)$")
+_DATE_RE = re.compile(r"\b((Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+\d{4}|\d{4})\s*[–—-]\s*((Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+\d{4}|\d{4}|Present|Current|Expected.*)", re.I)
 
 
-def save_settings(updates: dict[str, Any]) -> dict[str, Any]:
-    data = load_settings()
-    if "model" in updates:
-        data["model"] = str(updates["model"]).strip() or DEFAULT_SETTINGS["model"]
-    if "max_turns" in updates:
-        data["max_turns"] = max(10, min(400, int(updates["max_turns"])))
-    PROFILE_DIR.mkdir(parents=True, exist_ok=True)
-    SETTINGS_PATH.write_text(json.dumps(data, indent=2) + "\n")
-    return data
+def reflow_resume(raw: str) -> str:
+    """Turn PDF line-wrapped text into one line per bullet.
+
+    PDF extraction yields the bullet glyph on its own line (or as a prefix)
+    followed by the bullet's text broken at the column width. This joins
+    those fragments back together so each bullet is a single `• ...` line,
+    which is what application forms expect in a description box.
+    """
+    out: list[str] = []
+    frags: list[str] = []
+    in_bullet = False
+    prev_len = 0
+
+    def flush() -> None:
+        nonlocal frags, in_bullet
+        if in_bullet and frags:
+            out.append("• " + " ".join(f.strip() for f in frags if f.strip()))
+        frags, in_bullet = [], False
+
+    for line in raw.splitlines():
+        stripped = re.sub(r"[ \t]{2,}", "  ", line).strip()
+        if not stripped:
+            flush(); prev_len = 0
+            continue
+        m = _BULLET_RE.match(stripped)
+        if m:
+            flush()
+            in_bullet = True
+            frags = [m.group(1)] if m.group(1).strip() else []
+            prev_len = len(m.group(1)) if frags else 999   # 999: next line is the first fragment
+            continue
+        is_header = bool(_DATE_RE.search(stripped))
+        continues = in_bullet and not is_header and (prev_len >= 80 or stripped[:1].islower() or stripped[:1] in "(,;&")
+        if continues:
+            frags.append(stripped)
+            prev_len = len(stripped)
+            continue
+        flush()
+        out.append(stripped)
+        prev_len = len(stripped)
+    flush()
+    return "\n".join(out)
 
 
 def status() -> dict[str, Any]:
