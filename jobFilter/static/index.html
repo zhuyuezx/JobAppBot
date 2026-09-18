@@ -84,7 +84,7 @@
       <button data-src="all" class="on">All sources</button>
     </div>
     <input id="q" type="search" placeholder="filter title / company / location">
-    <label class="chk" title="hide jobs the screening marked as unlikely to sponsor"><input type="checkbox" id="hideUnlikely"> hide unlikely sponsors</label>
+    <label class="chk" title="hide jobs the screening marked as unlikely to sponsor or not new-grad level"><input type="checkbox" id="hideUnlikely"> hide unlikely / not new-grad</label>
   </div>
   <span class="count" id="count"></span>
 </header>
@@ -135,7 +135,8 @@ function spBadge(sc) {
   if (!sc) return '<span class="badge sp-pending" title="not screened yet">unscreened</span>';
   if (sc.status !== 'ok') return '<span class="badge sp-pending" title="screening failed">screen failed</span>';
   const v = sc.verdict || 'unknown';
-  return `<span class="badge sp-${esc(v)}" title="${esc(sc.summary || '')}">${esc(SP_LABEL[v] || v)}${sc.fit_score != null ? ' · fit ' + sc.fit_score : ''}</span>`;
+  return `<span class="badge sp-${esc(v)}" title="${esc(sc.summary || '')}">${esc(SP_LABEL[v] || v)}${sc.fit_score != null ? ' · fit ' + sc.fit_score : ''}</span>`
+       + (sc.new_grad_fit === 0 ? '<span class="badge warn" title="the screening judged this is not a 0-1 year role">not new-grad</span>' : '');
 }
 function screenBlock(r) {
   const sc = r.screening;
@@ -227,7 +228,7 @@ function render() {
   const postedDay = r => (r.job.published_at || '').slice(0, 10);
   const hideUnlikely = $('#hideUnlikely').checked;
   const shown = rows.filter(r => srcFilter === 'all' || (r.job.via || 'hiringcafe') === srcFilter)
-                    .filter(r => !hideUnlikely || !(r.screening && r.screening.status === 'ok' && r.screening.verdict === 'unlikely'))
+                    .filter(r => !hideUnlikely || !(r.screening && r.screening.status === 'ok' && (r.screening.verdict === 'unlikely' || r.screening.new_grad_fit === 0)))
                     .filter(r => !q || [r.title, r.company, r.location].join(' ').toLowerCase().includes(q))
                     .sort((a, b) => localDay(b.first_seen).localeCompare(localDay(a.first_seen))
                                  || postedDay(b).localeCompare(postedDay(a))

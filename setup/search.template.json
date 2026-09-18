@@ -156,6 +156,14 @@
     ],
     "_max_min_yoe": "Drop if the posting's minimum years of experience is above this.",
     "max_min_yoe": 1,
+    "_infer_yoe_from_description": "Sources that carry no seniority/experience metadata: read the posting text and infer the minimum years (a new-grad phrase counts as 0) before applying max_min_yoe.",
+    "infer_yoe_from_description": [
+      "startupjobs"
+    ],
+    "_require_stated_yoe": "Drop jobs from these sources when the posting states no experience requirement at all (otherwise they can't be judged).",
+    "require_stated_yoe": [
+      "startupjobs"
+    ],
     "_exclude_security_clearance": "Drop postings that need any security clearance.",
     "exclude_security_clearance": true,
     "_max_age_hours": "Drop postings whose estimated publish date is older than this many hours. null = off.",

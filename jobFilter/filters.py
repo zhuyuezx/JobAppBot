@@ -83,3 +83,35 @@ def apply_rules(jobs: list[Job], rules: dict[str, Any]) -> tuple[list[Job], list
         else:
             kept.append(job)
     return kept, rejected
+
+
+def enrich_experience(jobs: list[Job], rules: dict[str, Any],
+                      fetch_text: Callable[[dict[str, Any]], str],
+                      log: Callable[[str], None] = lambda s: None) -> tuple[list[Job], list[tuple[Job, str]]]:
+    """Second pass for sources without seniority metadata.
+
+    For jobs from `rules.infer_yoe_from_description` (default: startup.jobs) whose
+    min_yoe is unknown, read the description, infer the minimum years of
+    experience, then re-apply the experience rule. Jobs from
+    `rules.require_stated_yoe` that still state nothing are dropped.
+    """
+    infer_for = set(rules.get("infer_yoe_from_description", ["startupjobs"]) or [])
+    require_for = set(rules.get("require_stated_yoe", ["startupjobs"]) or [])
+    kept: list[Job] = []
+    rejected: list[tuple[Job, str]] = []
+    from jobFilter.descriptions import infer_min_yoe
+    for job in jobs:
+        if job.via in infer_for and job.min_yoe is None:
+            text = fetch_text({"id": job.id, "job": job.to_dict()})
+            yoe, ng = infer_min_yoe(text)
+            if yoe is not None:
+                job.min_yoe = yoe
+                job.seniority = job.seniority or ("No Prior Experience Required" if yoe <= 1 else "Mid Level")
+                job.raw = {**job.raw, "inferred_yoe": yoe, "new_grad_phrase": ng}
+            reason = _max_yoe(job, rules)
+            if reason:
+                rejected.append((job, reason)); continue
+            if job.min_yoe is None and job.via in require_for:
+                rejected.append((job, "experience not stated in posting")); continue
+        kept.append(job)
+    return kept, rejected

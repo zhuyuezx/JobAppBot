@@ -94,6 +94,11 @@ def cmd_run(args) -> int:
         return 2
 
     kept, rejected = apply_rules(jobs, rules)
+    if rules:  # sources without experience metadata: read the posting and re-check the experience rule
+        from jobFilter.descriptions import fetch_description
+        from jobFilter.filters import enrich_experience
+        kept, more = enrich_experience(kept, rules, fetch_description, log=log)
+        rejected += more
     log(f"{len(jobs)} fetched, {len(kept)} kept, {len(rejected)} rejected")
     for reason, n in Counter(r for _, r in rejected).most_common():
         log(f"  - {reason}: {n}")

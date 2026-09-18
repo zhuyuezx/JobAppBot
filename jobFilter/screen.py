@@ -17,7 +17,6 @@ import os
 import re
 import subprocess
 import time
-import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -25,7 +24,6 @@ from typing import Any, Callable, Optional
 from curl_cffi import requests
 
 from jobFilter.apply_engine import find_claude
-from jobFilter.hiringcafe import HiringCafeClient, html_to_text
 from jobFilter.store import Store
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -70,59 +68,7 @@ def company_key(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", n).strip()
 
 
-# ----- description fetchers (no LLM) -----------------------------------------------
-def _get_json(url: str, **kw) -> Any:
-    r = requests.get(url, impersonate="chrome", timeout=60, headers={"accept": "application/json"}, **kw)
-    r.raise_for_status()
-    return r.json()
-
-
-def fetch_description(row: dict[str, Any]) -> str:
-    """Best-effort plain-text description; empty string when no server-side path exists."""
-    job = row["job"]
-    url = job.get("apply_url") or ""
-    try:
-        if job.get("via") == "hiringcafe":
-            return HiringCafeClient().job_description_text(row["id"])
-        m = re.match(r"https://([a-z0-9-]+)\.(wd\d+)\.myworkdayjobs\.com/(?:[a-z]{2}-[A-Z]{2}/)?([^/?#]+)/job/(.+?)(?:\?|$)", url, re.I)
-        if m:  # Workday: same path under /wday/cxs/<tenant>/<site>/job/...
-            tenant, wd, site, rest = m.groups()
-            d = _get_json(f"https://{tenant}.{wd}.myworkdayjobs.com/wday/cxs/{tenant}/{site}/job/{rest}")
-            return html_to_text((d.get("jobPostingInfo") or {}).get("jobDescription") or "")
-        m = re.search(r"greenhouse\.io/([^/?#]+)/jobs/(\d+)", url)
-        if m:
-            d = _get_json(f"https://boards-api.greenhouse.io/v1/boards/{m.group(1)}/jobs/{m.group(2)}")
-            return html_to_text(urllib.parse.unquote(d.get("content") or "").replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&"))
-        m = re.search(r"jobs\.lever\.co/([^/?#]+)/([0-9a-f-]{36})", url)
-        if m:
-            d = _get_json(f"https://api.lever.co/v0/postings/{m.group(1)}/{m.group(2)}")
-            return html_to_text(d.get("description") or "") + "\n" + "\n".join(html_to_text(x.get("content") or "") for x in d.get("lists") or [])
-        m = re.search(r"jobs\.smartrecruiters\.com/([^/?#]+)/(\d+)", url)
-        if m:
-            d = _get_json(f"https://api.smartrecruiters.com/v1/companies/{m.group(1)}/postings/{m.group(2)}")
-            secs = (d.get("jobAd") or {}).get("sections") or {}
-            return "\n\n".join(html_to_text(v.get("text") or "") for v in secs.values() if isinstance(v, dict))
-        if job.get("via") == "startupjobs" and "startup.jobs/" in url:  # JobPosting JSON-LD on the listing page
-            r = requests.get(url, impersonate="chrome", timeout=60)
-            for block in re.findall(r'<script type="application/ld\+json">(.*?)</script>', r.text, re.S):
-                try:
-                    items = json.loads(block)
-                except ValueError:
-                    continue
-                for it in (items if isinstance(items, list) else [items]):
-                    if isinstance(it, dict) and it.get("@type") == "JobPosting" and it.get("description"):
-                        return html_to_text(it["description"])
-            return ""
-        m = re.search(r"jobs\.ashbyhq\.com/([^/?#]+)/([0-9a-f-]{36})", url)
-        if m:
-            d = _get_json(f"https://api.ashbyhq.com/posting-api/job-board/{m.group(1)}?includeCompensation=true")
-            for jp in d.get("jobs") or []:
-                if jp.get("id") == m.group(2):
-                    return jp.get("descriptionPlain") or html_to_text(jp.get("descriptionHtml") or "")
-    except Exception:
-        return ""
-    return ""
-
+from jobFilter.descriptions import fetch_description  # noqa: E402,F401  (kept for callers)
 
 # ----- the LLM call -----------------------------------------------------------------
 def build_prompt(row: dict[str, Any], description: str, cached: Optional[dict[str, Any]]) -> str:

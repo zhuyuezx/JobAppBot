@@ -92,6 +92,8 @@ from the caller's IP, which is why the config pins the United States.
 | `max_min_yoe` | `min_industry_and_role_yoe` |
 | `exclude_security_clearance` | `security_clearance != "None"` |
 | `max_age_hours` | `estimated_publish_date_millis` |
+| `infer_yoe_from_description` | for these sources (default `startupjobs`), when `min_yoe` is unknown the posting text is fetched (`descriptions.fetch_description`) and `infer_min_yoe` extracts the smallest "N years ... experience" figure; a new-grad phrase counts as 0. Then `max_min_yoe` is re-applied |
+| `require_stated_yoe` | drop jobs from these sources whose posting states no experience requirement at all |
 
 The `visa_sponsorship` flag is exposed but never filtered on: it is `false`
 for most postings, including companies that do sponsor.
@@ -180,7 +182,7 @@ a container).
 Post-fetch step in `run` (skip with `--no-screen`) and the `screen` command.
 For each unscreened job (`Store.unscreened`, capped by `screening.max_per_run`):
 
-1. `fetch_description` gets plain text without an LLM where an API exists:
+1. `descriptions.fetch_description` gets plain text without an LLM where an API exists:
    hiring.cafe description endpoint, Workday `/wday/cxs/<tenant>/<site>/job/...`,
    Greenhouse boards API, Lever postings API, Ashby job-board API,
    SmartRecruiters postings API, startup.jobs JobPosting JSON-LD. Otherwise the
@@ -279,6 +281,7 @@ jobFilter/scheduler.py     foreground interval loop
 jobFilter/profile.py       setup/profile.json, setup/answers.json, resume text
 .claude/skills/apply-job/  the form-filling skill Claude follows and extends
 setup/                     user setup (gitignored) + tracked templates
+jobFilter/descriptions.py  description fetchers per ATS + years-of-experience inference
 jobFilter/screen.py        post-fetch LLM screening (sponsorship + fit), company cache
 jobFilter/apply_engine.py  Claude Code + Chrome runner, worker thread
 jobFilter/cli.py           argparse entry point
