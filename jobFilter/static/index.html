@@ -48,6 +48,9 @@
   .q input[type=text] { width:100%; }
   img.shot { max-width:100%; border:1px solid var(--line); border-radius:8px; margin-top:8px; }
   h2 { font-size:15px; margin:18px 0 8px; }
+  .ghead { display:flex; align-items:center; gap:10px; margin:18px 0 4px; padding:6px 6px; border-bottom:2px solid var(--line); font-weight:650; font-size:14px; position:sticky; top:58px; background:var(--bg); z-index:1; }
+  .ghead .n { color:var(--muted); font-weight:500; }
+  .found { white-space:nowrap; } .found small { display:block; color:var(--muted); font-weight:400; }
   .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
   table { border-collapse:collapse; width:100%; } td, th { text-align:left; padding:6px; border-bottom:1px solid var(--line); vertical-align:top; } th { color:var(--muted); font-weight:500; }
   @media (max-width: 800px) { .row { grid-template-columns: 1fr; gap:2px; } .kv, .grid2 { grid-template-columns: 1fr; } }
@@ -69,6 +72,9 @@
       <button data-mode="all">All</button>
     </div>
     <select id="date" hidden></select>
+    <div class="seg" id="srcTabs" title="source">
+      <button data-src="all" class="on">All sources</button>
+    </div>
     <input id="q" type="search" placeholder="filter title / company / location">
   </div>
   <span class="count" id="count"></span>
@@ -111,6 +117,7 @@ async function api(path, body) {
   const r = await fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : undefined);
   return r.json();
 }
+const VIA_LABEL = { hiringcafe: 'hiring.cafe', simplify: 'Simplify', startupjobs: 'startup.jobs' };
 const STATUS_CLASS = { queued: '', running: 'warn', review_ready: 'ok', needs_answer: 'warn', needs_login: 'warn', captcha: 'warn', already_applied: '', failed: 'bad', submitted: 'ok', skipped: '' };
 const STATUS_LABEL = { queued: 'queued', running: 'Claude is working', review_ready: 'ready to submit', needs_answer: 'needs your answer', needs_login: 'needs login / code', captcha: 'CAPTCHA', already_applied: 'already applied', failed: 'failed', submitted: 'submitted', skipped: 'skipped' };
 const badge = st => st ? `<span class="badge ${STATUS_CLASS[st] || ''}">${esc(STATUS_LABEL[st] || st)}</span>` : '';
@@ -139,35 +146,57 @@ function jobDetails(j, r) {
     <dt>Tools</dt><dd>${esc((j.technical_tools || []).join(', '))}</dd>
     <dt>Requirements</dt><dd>${esc(j.requirements_summary || '')}</dd>
     <dt>Company site</dt><dd>${esc(j.company_website || '')}</dd>
-    <dt>Source</dt><dd>${esc(j.source || '')}</dd>
-    <dt>First seen</dt><dd>${fmt(r.first_seen)} (seen ${r.seen_count}x)</dd>
+    <dt>Source</dt><dd>${esc(j.source || '')}${j.via ? ' via ' + esc(VIA_LABEL[j.via] || j.via) : ''}</dd>
+    <dt>Posted</dt><dd>${fmt(j.published_at)}</dd>
+    <dt>Found</dt><dd>${fmt(r.first_seen)} via ${esc(VIA_LABEL[j.via] || 'hiring.cafe')} (seen ${r.seen_count}x)</dd>
   </dl>`;
 }
-function render() {
-  const q = $('#q').value.trim().toLowerCase();
-  const shown = rows.filter(r => !q || [r.title, r.company, r.location].join(' ').toLowerCase().includes(q));
-  $('#count').textContent = `${shown.length} job${shown.length === 1 ? '' : 's'}` + (q ? ` (of ${rows.length})` : '');
-  if (!shown.length) { $('#list').innerHTML = '<div class="empty">Nothing here. Run <code>jobfilter run</code> to fetch.</div>'; return; }
-  $('#list').innerHTML = shown.map(r => {
-    const j = r.job, link = j.apply_url || r.hc_url;
-    return `<div class="job" data-id="${esc(r.id)}">
+let srcFilter = 'all';
+const SRC_ORDER = ['hiringcafe', 'simplify', 'startupjobs'];
+const localDay = iso => { const d = new Date(iso); return isNaN(d) ? '' : `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
+const localTime = iso => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); };
+function groupKey(r) {
+  const d = localDay(r.first_seen), today = localDay(new Date().toISOString());
+  return d === today ? `Found today, ${d}` : `Found ${d}`;
+}
+function renderSrcTabs() {
+  const counts = {}; rows.forEach(r => { const v = r.job.via || 'hiringcafe'; counts[v] = (counts[v] || 0) + 1; });
+  const present = [...SRC_ORDER.filter(v => counts[v]), ...Object.keys(counts).filter(v => !SRC_ORDER.includes(v))];
+  $('#srcTabs').innerHTML = `<button data-src="all" class="${srcFilter === 'all' ? 'on' : ''}">All sources <span class="badge">${rows.length}</span></button>` +
+    present.map(v => `<button data-src="${esc(v)}" class="${srcFilter === v ? 'on' : ''}">${esc(VIA_LABEL[v] || v)} <span class="badge">${counts[v]}</span></button>`).join('');
+  if (srcFilter !== 'all' && !counts[srcFilter]) srcFilter = 'all';
+}
+function rowHtml(r) {
+  const j = r.job, link = j.apply_url || r.hc_url;
+  return `<div class="job" data-id="${esc(r.id)}">
       <div class="row">
         <div class="title"><a href="${esc(link)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(j.title)}</a>
-          ${j.visa_sponsorship ? '<span class="badge ok">visa</span>' : ''}${isRecent(r.first_seen) ? '<span class="badge warn">new</span>' : ''}${badge(r.app_status)}</div>
+          ${j.visa_sponsorship ? '<span class="badge ok">visa</span>' : ''}${isRecent(r.first_seen) ? '<span class="badge warn">new</span>' : ''}${(srcFilter === 'all') ? `<span class="badge" title="found via ${esc(j.via || 'hiringcafe')}">${esc(VIA_LABEL[j.via] || 'hiring.cafe')}</span>` : ''}${badge(r.app_status)}</div>
         <div class="muted" title="${esc(j.company)}">${esc(j.company)}</div>
         <div class="muted" title="${esc(j.location)}">${esc(j.location || '')}</div>
-        <div class="muted">${fmt(j.published_at)}</div>
+        <div class="found" title="found ${esc(fmt(r.first_seen))} · posted ${esc(fmt(j.published_at))}">found ${localTime(r.first_seen)}<small>posted ${esc((j.published_at || '').slice(0, 10))}</small></div>
       </div>
       <div class="details">
         ${jobDetails(j, r)}
         <div class="actions">
           ${r.app_status ? `<button class="btn" data-act="goapps">Open in Applications</button>` : `<button class="btn primary" data-act="prepare">Prepare application with Claude</button>`}
           ${j.apply_url ? `<a class="btn" href="${esc(j.apply_url)}" target="_blank" rel="noopener">Apply page</a>` : ''}
-          <a class="btn" href="${esc(r.hc_url)}" target="_blank" rel="noopener">hiring.cafe</a>
+          <a class="btn" href="${esc(r.hc_url)}" target="_blank" rel="noopener">${esc(VIA_LABEL[j.via] || 'hiring.cafe')}</a>
         </div>
       </div>
     </div>`;
-  }).join('');
+}
+function render() {
+  const q = $('#q').value.trim().toLowerCase();
+  renderSrcTabs();
+  const shown = rows.filter(r => srcFilter === 'all' || (r.job.via || 'hiringcafe') === srcFilter)
+                    .filter(r => !q || [r.title, r.company, r.location].join(' ').toLowerCase().includes(q))
+                    .sort((a, b) => (b.first_seen || '').localeCompare(a.first_seen || '') || (b.job.published_at || '').localeCompare(a.job.published_at || ''));
+  $('#count').textContent = `${shown.length} job${shown.length === 1 ? '' : 's'}` + (srcFilter !== 'all' || q ? ` (of ${rows.length})` : '');
+  if (!shown.length) { $('#list').innerHTML = '<div class="empty">Nothing here. Run <code>jobfilter run</code> to fetch.</div>'; return; }
+  const groups = new Map();
+  for (const r of shown) { const k = groupKey(r); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); }
+  $('#list').innerHTML = [...groups.keys()].map(k => `<div class="ghead">${esc(k)} <span class="n">${groups.get(k).length}</span></div>` + groups.get(k).map(rowHtml).join('')).join('');
 }
 async function load() {
   let path = '/api/jobs';
@@ -186,6 +215,13 @@ $('#mode').addEventListener('click', e => {
   $('#date').hidden = mode !== 'date'; load();
 });
 $('#date').addEventListener('change', load);
+$('#srcTabs').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  srcFilter = b.dataset.src;
+  try { localStorage.setItem('jf.src', srcFilter); } catch (_) {}
+  render();
+});
+try { srcFilter = localStorage.getItem('jf.src') || 'all'; } catch (_) {}
 $('#q').addEventListener('input', render);
 $('#list').addEventListener('click', async e => {
   const job = e.target.closest('.job'); if (!job) return;

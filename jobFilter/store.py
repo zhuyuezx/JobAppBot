@@ -26,6 +26,9 @@ CREATE TABLE IF NOT EXISTS jobs (
     apply_url     TEXT,
     hc_url        TEXT,
     visa_hint     INTEGER,
+    via           TEXT NOT NULL DEFAULT 'hiringcafe',
+    norm_url      TEXT,
+    norm_key      TEXT,
     job_json      TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS jobs_dedup ON jobs(dedup_key);
@@ -87,9 +90,27 @@ class Store:
         self.conn = sqlite3.connect(self.path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
+        self._migrate()
 
     def close(self) -> None:
         self.conn.close()
+
+    def _migrate(self) -> None:
+        """Add columns introduced after the first release and backfill them."""
+        cols = {r[1] for r in self.conn.execute("PRAGMA table_info(jobs)")}
+        added = False
+        for col, ddl in (("via", "TEXT NOT NULL DEFAULT 'hiringcafe'"), ("norm_url", "TEXT"), ("norm_key", "TEXT")):
+            if col not in cols:
+                self.conn.execute(f"ALTER TABLE jobs ADD COLUMN {col} {ddl}")
+                added = True
+        if added or self.conn.execute("SELECT COUNT(*) FROM jobs WHERE norm_key IS NULL").fetchone()[0]:
+            for row in self.conn.execute("SELECT id, job_json FROM jobs WHERE norm_key IS NULL").fetchall():
+                j = json.loads(row["job_json"])
+                job = Job(**{k: v for k, v in j.items() if k in Job.__dataclass_fields__ and k != "raw"})
+                self.conn.execute("UPDATE jobs SET norm_url = ?, norm_key = ?, via = ? WHERE id = ?",
+                                  (job.norm_url(), job.norm_key(), job.via, row["id"]))
+            self.conn.executescript("CREATE INDEX IF NOT EXISTS jobs_norm_url ON jobs(norm_url); CREATE INDEX IF NOT EXISTS jobs_norm_key ON jobs(norm_key);")
+            self.conn.commit()
 
     # ----- writes --------------------------------------------------------
     def upsert_many(self, jobs: list[Job], run_id: str) -> list[Job]:
@@ -100,8 +121,11 @@ class Store:
         new: list[Job] = []
         cur = self.conn.cursor()
         for job in jobs:
-            row = cur.execute("SELECT id FROM jobs WHERE id = ? OR dedup_key = ?",
-                              (job.id, job.dedup_key)).fetchone()
+            nurl, nkey = job.norm_url(), job.norm_key()
+            # same posting seen before: by id, by hiring.cafe's dedup cluster, by apply URL, or by company+title
+            row = cur.execute(
+                "SELECT id FROM jobs WHERE id = ? OR dedup_key = ? OR (norm_url IS NOT NULL AND norm_url = ?) OR (norm_key = ? AND norm_key != '')",
+                (job.id, job.dedup_key, nurl, nkey)).fetchone()
             if row:
                 cur.execute("UPDATE jobs SET last_seen = ?, seen_count = seen_count + 1 WHERE id = ?",
                             (now_iso, row["id"]))
@@ -109,13 +133,13 @@ class Store:
             cur.execute(
                 """INSERT INTO jobs (id, dedup_key, first_seen, first_seen_date, last_seen, first_run_id,
                                      published_at, published_millis, title, company, location,
-                                     apply_url, hc_url, visa_hint, job_json)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                     apply_url, hc_url, visa_hint, via, norm_url, norm_key, job_json)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (job.id, job.dedup_key, now_iso, local_date, now_iso, run_id,
                  job.published_at, job.published_millis, job.title, job.company, job.location,
                  job.apply_url, job.hc_url,
                  None if job.visa_sponsorship is None else int(job.visa_sponsorship),
-                 json.dumps(job.to_dict())),
+                 job.via, nurl, nkey, json.dumps(job.to_dict())),
             )
             new.append(job)
         self.conn.commit()

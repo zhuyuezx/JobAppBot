@@ -20,7 +20,7 @@ from typing import Any
 
 from jobFilter import schema
 from jobFilter.filters import apply_rules
-from jobFilter.hiringcafe import HiringCafeClient, HiringCafeError
+from jobFilter.hiringcafe import HiringCafeClient, HiringCafeError  # noqa: F401  (used by `show`-style helpers and tests)
 from jobFilter.models import Job
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -51,7 +51,8 @@ def search_state_from_url(url: str) -> dict[str, Any]:
 def format_line(j: Job) -> str:
     posted = (j.published_at or "")[:16].replace("T", " ")
     visa = "visa:yes" if j.visa_sponsorship else "visa:?"
-    return f"{posted}  {j.title} | {j.company} | {j.location or '?'} | {visa}\n    {j.apply_url or j.hc_url}"
+    via = "" if j.via == "hiringcafe" else f" | via {j.via}"
+    return f"{posted}  {j.title} | {j.company} | {j.location or '?'} | {visa}{via}\n    {j.apply_url or j.hc_url}"
 
 
 def today_local() -> str:
@@ -83,12 +84,13 @@ def cmd_run(args) -> int:
     rules = {} if args.no_rules else cfg["rules"]
     run_id = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
 
-    client = HiringCafeClient()
-    log(f"[{run_id}] fetching {client.search_url(search_state)}")
-    try:
-        jobs = [Job.from_hit(h) for h in client.search(search_state, max_pages=args.max_pages)]
-    except HiringCafeError as e:
-        log(f"fetch failed: {e}")
+    from jobFilter import sources
+    if args.url:  # a pasted hiring.cafe URL means "run just that search"
+        cfg["sources"] = {"hiringcafe": True, "simplify": False, "startupjobs": False}
+    log(f"[{run_id}] fetching from {', '.join(n for n, c in sources.sources_config(cfg).items() if c.get('enabled'))}")
+    jobs, counts, errors = sources.fetch_all(cfg, search_state=search_state, max_pages=args.max_pages, log=log)
+    if not jobs and errors:
+        log("every source failed")
         return 2
 
     kept, rejected = apply_rules(jobs, rules)
@@ -135,9 +137,17 @@ def cmd_list(args) -> int:
     from jobFilter.store import Store
     store = Store(DB_PATH)
     rows = _select_rows(store, args)
+    if args.source:
+        rows = [r for r in rows if (r["job"].get("via") or "hiringcafe") == args.source]
+    rows.sort(key=lambda r: r["first_seen"], reverse=True)
+    by_via: dict[str, list] = {}
     for r in rows:
-        j = r["job"]
-        print(f"{r['first_seen'][:16].replace('T',' ')}  {j['title']} | {j['company']} | {j.get('location') or '?'}\n    {j.get('apply_url') or r['hc_url']}")
+        by_via.setdefault(r["job"].get("via") or "hiringcafe", []).append(r)
+    for via in sorted(by_via, key=lambda v: ["hiringcafe", "simplify", "startupjobs"].index(v) if v in ("hiringcafe", "simplify", "startupjobs") else 9):
+        print(f"\n===== {via} ({len(by_via[via])}) =====")
+        for r in by_via[via]:
+            j = r["job"]
+            print(f"found {r['first_seen'][:16].replace('T',' ')}  posted {(j.get('published_at') or '?')[:10]}  {j['title']} | {j['company']} | {j.get('location') or '?'}\n    {j.get('apply_url') or r['hc_url']}")
     log(f"{len(rows)} jobs")
     return 0
 
@@ -214,8 +224,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     sub = p.add_subparsers(dest="cmd")
 
-    r = sub.add_parser("run", help="fetch, filter, store, print list, write daily excel")
-    r.add_argument("url", nargs="?", help="hiring.cafe search URL (default: config search_state)")
+    r = sub.add_parser("run", help="fetch from all enabled sources, filter, store, print list, write daily excel")
+    r.add_argument("url", nargs="?", help="hiring.cafe search URL: run only that search (default: config search_state + all sources)")
     r.add_argument("--no-rules", action="store_true", help="skip the rules block")
     r.add_argument("--no-store", action="store_true", help="print only, don't touch the db or daily excel")
     r.add_argument("--new-only", action="store_true", help="print only jobs not seen in earlier runs")
@@ -232,6 +242,8 @@ def build_parser() -> argparse.ArgumentParser:
         c.add_argument("--date", metavar="YYYY-MM-DD", help="first seen on this local date")
         if name == "excel":
             c.add_argument("--out", type=Path)
+        else:
+            c.add_argument("--source", choices=["hiringcafe", "simplify", "startupjobs"], help="only this source")
         c.set_defaults(func=fn)
 
     s = sub.add_parser("serve", help="local web UI")

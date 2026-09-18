@@ -26,7 +26,8 @@ COLUMNS: list[tuple[str, str, int]] = [
     ("Requirements", "requirements_summary", 80),
     ("Apply URL", "apply_url", 60),
     ("hiring.cafe URL", "hc_url", 60),
-    ("Source", "source", 12),
+    ("ATS", "source", 12),
+    ("Via", "via", 12),
 ]
 
 
@@ -50,15 +51,14 @@ def flatten(row: dict[str, Any]) -> dict[str, Any]:
         "apply_url": job.get("apply_url"),
         "hc_url": row.get("hc_url") or job.get("hc_url"),
         "source": job.get("source"),
+        "via": job.get("via") or row.get("via") or "hiringcafe",
     }
 
 
-def write_excel(rows: list[dict[str, Any]], path: str | Path, sheet_title: str = "jobs") -> Path:
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    wb = Workbook()
-    ws = wb.active
-    ws.title = sheet_title[:31]
+VIA_LABEL = {"hiringcafe": "hiring.cafe", "simplify": "Simplify", "startupjobs": "startup.jobs"}
+
+
+def _fill_sheet(ws, rows: list[dict[str, Any]]) -> None:
     ws.append([h for h, _, _ in COLUMNS])
     for cell in ws[1]:
         cell.font = Font(bold=True)
@@ -76,6 +76,23 @@ def write_excel(rows: list[dict[str, Any]], path: str | Path, sheet_title: str =
         for cell in row_cells:
             cell.alignment = Alignment(vertical="top", wrap_text=False)
     ws.freeze_panes = "A2"
-    ws.auto_filter.ref = ws.dimensions
+    if rows:
+        ws.auto_filter.ref = ws.dimensions
+
+
+def write_excel(rows: list[dict[str, Any]], path: str | Path, sheet_title: str = "jobs") -> Path:
+    """One workbook: sheet 'all' (newest discovery first) plus one sheet per source."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rows = sorted(rows, key=lambda r: (r.get("first_seen") or "", r["job"].get("published_at") or ""), reverse=True)
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "all"
+    _fill_sheet(ws, rows)
+    by_via: dict[str, list[dict[str, Any]]] = {}
+    for r in rows:
+        by_via.setdefault(r["job"].get("via") or r.get("via") or "hiringcafe", []).append(r)
+    for via in sorted(by_via, key=lambda v: list(VIA_LABEL).index(v) if v in VIA_LABEL else 99):
+        _fill_sheet(wb.create_sheet(VIA_LABEL.get(via, via)[:31]), by_via[via])
     wb.save(path)
     return path

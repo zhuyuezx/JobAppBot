@@ -8,32 +8,54 @@
   "search_state": {
     "_searchQuery": "Free-text query, same as the site's search box.",
     "searchQuery": "software engineer",
-
     "_workplaceTypes": "Subset of: Remote, Hybrid, Onsite, Field. Omit for all.",
-    "workplaceTypes": ["Onsite", "Field", "Hybrid"],
-
+    "workplaceTypes": [
+      "Onsite",
+      "Field",
+      "Hybrid"
+    ],
     "_commitmentTypes": "Subset of: Full Time, Part Time, Contract, Internship, Temporary, Seasonal, Volunteer.",
-    "commitmentTypes": ["Full Time"],
-
+    "commitmentTypes": [
+      "Full Time"
+    ],
     "_seniorityLevel": "Subset of: No Prior Experience Required, Entry Level, Mid Level, Senior Level.",
-    "seniorityLevel": ["No Prior Experience Required"],
-
+    "seniorityLevel": [
+      "No Prior Experience Required"
+    ],
     "_dateFetchedPastNDays": "Number of days since hiring.cafe fetched the posting (1 = today, 2, 3, 7, 14, 30...). Site default 121. Also accepts {\"from\": \"2026-09-01\", \"to\": \"2026-09-15\"}.",
     "dateFetchedPastNDays": 2,
-
     "_locations": "List of place objects from https://hiringcafe.com/api/searchLocation?query=<text> (use the placeDetail part). The one below is the site's built-in 'United States'. Omit entirely to let hiring.cafe pick your country from your IP.",
     "locations": [
       {
         "formatted_address": "United States",
-        "types": ["country"],
-        "geometry": {"location": {"lat": 0, "lon": 0}},
+        "types": [
+          "country"
+        ],
+        "geometry": {
+          "location": {
+            "lat": 0,
+            "lon": 0
+          }
+        },
         "id": "user_country",
-        "address_components": [{"long_name": "United States", "short_name": "US", "types": ["country"]}],
-        "options": {"flexible_regions": ["anywhere_in_continent", "anywhere_in_world"]}
+        "address_components": [
+          {
+            "long_name": "United States",
+            "short_name": "US",
+            "types": [
+              "country"
+            ]
+          }
+        ],
+        "options": {
+          "flexible_regions": [
+            "anywhere_in_continent",
+            "anywhere_in_world"
+          ]
+        }
       }
     ],
     "_excludedWorkplaceLocations": "Same shape as locations; jobs there are dropped.",
-
     "_roleYoeRange": "[min, max] years of role experience; max 20 means 20+. Default [0, 20].",
     "_excludeIfRoleYoeIsNotSpecified": "true drops postings that don't state years of experience.",
     "_securityClearances": "Subset of: None, Confidential, Secret, Top Secret, Top Secret/SCI, Public Trust, Interim Clearances, Other. ['None'] = only jobs with no clearance.",
@@ -56,17 +78,69 @@
     "_sortBy": "default (relevance), date (newest), date_asc, compensation_desc, compensation_asc, experience_asc, experience_desc. resume_match_desc / personalization_desc need a logged-in account.",
     "_account_only": "hideJobTypes (Hidden, Saved, Applied, Viewed), degenMode, degenModeCategories, activitySignals need a hiring.cafe login and do nothing here."
   },
-
+  "sources": {
+    "_readme": "Where jobs come from. Every source feeds the same rules, database, Excel and web page. Set a source to false to turn it off.",
+    "hiringcafe": {
+      "enabled": true
+    },
+    "simplify": {
+      "_what": "SimplifyJobs/New-Grad-Positions on GitHub, machine-readable listings.json. Curated new-grad roles, updated several times a day.",
+      "enabled": true,
+      "_categories": "Simplify categories to keep: Software, Software Engineering, AI/ML/Data, Hardware, Quant, Product. They map onto hiring.cafe categories for the require_categories rule (Software -> Software Development, AI/ML/Data -> Data and Analytics).",
+      "categories": [
+        "Software",
+        "Software Engineering"
+      ],
+      "_max_age_days": "Only listings posted within this many days.",
+      "max_age_days": 3
+    },
+    "startupjobs": {
+      "_what": "startup.jobs role listings (HTML). Mostly senior and international; your title and country rules do the filtering.",
+      "enabled": true,
+      "_roles": "Role slugs from startup.jobs/roles/<slug>, e.g. software-engineer, backend-engineer, full-stack-engineer, frontend-engineer.",
+      "roles": [
+        "software-engineer"
+      ],
+      "_max_pages": "Pages per role per scan (about 19 cards each); paging stops early once a page is entirely older than max_age_days.",
+      "max_pages": 10,
+      "max_age_days": 2
+    }
+  },
   "rules": {
     "_readme": "Applied locally after fetching. Every rule is optional; remove it or set null to disable.",
     "_require_countries": "Job must list at least one of these ISO country codes (from the posting's workplace_countries).",
-    "require_countries": ["US"],
+    "require_countries": [
+      "US"
+    ],
     "_require_categories": "hiring.cafe job_category must be one of these. Seen values: Software Development, Engineering, Quality Assurance, Information Technology, Research and Development (R&D), Data and Analytics, Customer Service, Project and Program Management, ...",
-    "require_categories": ["Software Development"],
+    "require_categories": [
+      "Software Development"
+    ],
     "_title_include": "Title must contain at least one of these (case-insensitive).",
-    "title_include": ["software", "engineer", "developer", "sde", "swe", "programmer"],
+    "title_include": [
+      "software",
+      "engineer",
+      "developer",
+      "sde",
+      "swe",
+      "programmer"
+    ],
     "_title_exclude": "Title must contain none of these.",
-    "title_exclude": ["senior", "sr.", "sr ", "staff", "principal", "lead", "manager", "director", "intern", "co-op", "coop", "contract", "clearance"],
+    "title_exclude": [
+      "senior",
+      "sr.",
+      "sr ",
+      "staff",
+      "principal",
+      "lead",
+      "manager",
+      "director",
+      "intern",
+      "co-op",
+      "coop",
+      "contract",
+      "clearance"
+    ],
     "_max_min_yoe": "Drop if the posting's minimum years of experience is above this.",
     "max_min_yoe": 1,
     "_exclude_security_clearance": "Drop postings that need any security clearance.",

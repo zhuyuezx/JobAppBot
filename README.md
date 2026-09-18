@@ -87,6 +87,25 @@ Applications run one at a time. Queue several and come back later.
 | `jobfilter log` | See what the last scans did |
 | `jobfilter py apply list` | Application statuses in the terminal |
 
+## Where the jobs come from
+
+Three sources feed the same database and the same page; a job that shows up in
+several is stored once (matched by apply link, then by company + title). On the
+Jobs tab, pick **All sources** or one source with the tabs at the top; rows are
+grouped by the day they were found and show the found time next to the posting
+date, so a day's new arrivals are easy to review. The daily Excel has an `all`
+sheet plus one sheet per source.
+
+| Source | What it adds | Notes |
+|---|---|---|
+| hiring.cafe | the broad search you configured | can lag days behind a company's own board |
+| SimplifyJobs New-Grad list | curated new-grad roles, updated several times a day | machine-readable, fastest for big-company postings |
+| startup.jobs | startup roles | mostly senior and international; your rules keep the US early-career ones |
+
+Turn any of them on or off, or tune them, in the `sources` block of
+`setup/search.json` (explained in the template). Company-specific feeds
+(Workday, Greenhouse, ...) can be added the same way later.
+
 ## Change what you're looking for
 
 Edit `setup/search.json`. It has two parts:
@@ -100,7 +119,7 @@ Then run `jobfilter py validate` to check it, and `jobfilter run` to try it.
 
 | Path | Contents |
 |---|---|
-| `data/jobs.db` | all jobs and applications |
+| `data/jobs.db` | all jobs (from every source) and applications |
 | `data/excel/2026-09-15.xlsx` | one workbook per day |
 | `setup/` | your search, profile, answer bank, resume (gitignored, templates tracked) |
 | `data/profile/` | resume text cache, model setting |

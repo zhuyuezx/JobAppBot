@@ -6,15 +6,40 @@ Technical companion to the top-level README.
 
 ```mermaid
 flowchart TD
-    A[setup/search.json<br/>search_state + rules] --> B[hiringcafe.py<br/>HiringCafeClient.search]
-    B -->|raw hits| C[models.py<br/>Job.from_hit]
-    C --> D[filters.py<br/>apply_rules]
+    A[setup/search.json<br/>search_state + sources + rules] --> B[sources.py<br/>fetch_all]
+    B --> B1[hiringcafe.py] & B2[Simplify listings.json] & B3[startup.jobs HTML]
+    B1 & B2 & B3 -->|Job list| D[filters.py<br/>apply_rules]
     D -->|kept| E[store.py<br/>Store.upsert_many]
     E -->|new jobs| F[stdout list]
     E --> G[excel.py<br/>data/excel/YYYY-MM-DD.xlsx]
     E --> H[server.py + static/index.html<br/>http://127.0.0.1:8765]
     S[bin/jobfilter<br/>launchd / systemd] -->|every hour| B
 ```
+
+## Sources (`sources.py`)
+
+`fetch_all(cfg)` runs every enabled source and returns one list of `Job`s,
+each tagged with `via`:
+
+| via | Fetcher | Mechanism | Fields it cannot fill |
+|---|---|---|---|
+| `hiringcafe` | `fetch_hiringcafe` | the client below | |
+| `simplify` | `fetch_simplify` | `listings.json` from SimplifyJobs/New-Grad-Positions (`dev` branch), ETag-cached in `data/cache/`; filtered to `active`, chosen categories, `max_age_days` | min YoE, clearance (set to "Other" when the list says citizenship is required), workplace type |
+| `startupjobs` | `fetch_startupjobs` | HTML of `startup.jobs/roles/<slug>?page=N`; cards parsed via their `data-post-template-target` attributes; stops when a whole page is older than `max_age_days` | min YoE, clearance; country guessed from the location text |
+
+Category mapping for the `require_categories` rule: Simplify `Software` and
+`Software Engineering` -> `Software Development`, `AI/ML/Data` -> `Data and
+Analytics`, `Hardware` -> `Engineering`; startup.jobs engineer/developer role
+slugs -> `Software Development`. Countries are guessed from location strings
+(`guess_countries`); for Simplify a bare "Remote" counts as US.
+
+Cross-source dedup lives in `Store.upsert_many`: a job is a repeat if its id,
+hiring.cafe dedup cluster, normalized apply URL (`Job.norm_url`, tracking
+params stripped) or normalized company+title (`Job.norm_key`) already exists.
+The `jobs` table has `via`, `norm_url`, `norm_key` columns (added by
+`Store._migrate` on older databases). A source that throws is logged and
+skipped; the scan continues with the others. The `sources` block of
+`setup/search.json` overrides `DEFAULT_SOURCES`.
 
 ## How the fetch works
 
@@ -119,7 +144,10 @@ vanilla-JS page.
 | `GET/POST /api/profile`, `/api/settings`, `/api/answers` | profile, engine settings, answer bank |
 | `GET /api/file?path=` | screenshot/log files under `data/apply` |
 
-The page supports `#jobs`, `#apps`, `#profile` deep links.
+The page supports `#jobs`, `#apps`, `#profile` deep links. The Jobs tab has a
+source selector (All / hiring.cafe / Simplify / startup.jobs, remembered in
+localStorage) and groups rows by `first_seen` day; `list --source X` and the
+per-source Excel sheets are the CLI/file equivalents.
 
 ## Background services (`bin/jobfilter`)
 
@@ -205,6 +233,7 @@ screenshot, ...) and runs with no permission prompts.
 ## Layout
 
 ```
+jobFilter/sources.py       hiring.cafe / Simplify / startup.jobs fetchers, fetch_all
 jobFilter/hiringcafe.py    client: Cloudflare-passing session, paging, descriptions
 jobFilter/schema.py        valid searchState keys/options, validate()
 jobFilter/models.py        Job dataclass normalized from a hit

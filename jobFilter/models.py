@@ -1,11 +1,13 @@
 """Normalized job record built from a hiring.cafe search hit."""
 from __future__ import annotations
 
+import re
 import urllib.parse
 from dataclasses import dataclass, field, asdict
 from typing import Any, Optional
 
 HC_JOB_URL = "https://hiringcafe.com/job/{id}"
+_TRACKING_PARAMS = ("utm_", "gh_src", "lever-source", "source", "ref", "src")
 
 
 @dataclass
@@ -33,11 +35,29 @@ class Job:
     apply_url: Optional[str]
     source: Optional[str]
     dedup_key: str
+    via: str = "hiringcafe"                 # aggregator the job came from: hiringcafe | simplify | startupjobs
+    listing_url: Optional[str] = None       # page on the aggregator; defaults to the hiring.cafe job page
     raw: dict[str, Any] = field(default_factory=dict, repr=False)
 
     @property
     def hc_url(self) -> str:
-        return HC_JOB_URL.format(id=urllib.parse.quote(self.id, safe=""))
+        """Listing page on the source aggregator (kept under the historical name)."""
+        return self.listing_url or HC_JOB_URL.format(id=urllib.parse.quote(self.id, safe=""))
+
+    # ----- cross-source dedup keys ------------------------------------------
+    def norm_url(self) -> Optional[str]:
+        """Apply URL without tracking params, scheme or trailing slash."""
+        if not self.apply_url:
+            return None
+        u = urllib.parse.urlsplit(self.apply_url.strip())
+        qs = [(k, v) for k, v in urllib.parse.parse_qsl(u.query, keep_blank_values=True)
+              if not k.lower().startswith(_TRACKING_PARAMS)]
+        path = u.path.rstrip("/").lower()
+        return f"{u.netloc.lower()}{path}" + (("?" + urllib.parse.urlencode(sorted(qs))) if qs else "")
+
+    def norm_key(self) -> str:
+        """Company + title, lowercased and stripped of punctuation."""
+        return re.sub(r"[^a-z0-9]+", " ", f"{self.company} {self.title}".lower()).strip()
 
     def to_dict(self, include_raw: bool = False) -> dict[str, Any]:
         d = asdict(self)
