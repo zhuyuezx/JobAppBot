@@ -10,6 +10,8 @@ flowchart TD
     B --> B1[hiringcafe.py] & B2[Simplify listings.json] & B3[startup.jobs HTML]
     B1 & B2 & B3 -->|Job list| D[filters.py<br/>apply_rules]
     D -->|kept| E[store.py<br/>Store.upsert_many]
+    E -->|new jobs| SC[screen.py<br/>Sonnet + WebSearch]
+    SC --> E
     E -->|new jobs| F[stdout list]
     E --> G[excel.py<br/>data/excel/YYYY-MM-DD.xlsx]
     E --> H[server.py + static/index.html<br/>http://127.0.0.1:8765]
@@ -173,6 +175,34 @@ session (and the timer) alive after logout.
 Verified on macOS 15 and Ubuntu 22.04 / Python 3.9 (systemd user session in
 a container).
 
+## Screening (`screen.py`)
+
+Post-fetch step in `run` (skip with `--no-screen`) and the `screen` command.
+For each unscreened job (`Store.unscreened`, capped by `screening.max_per_run`):
+
+1. `fetch_description` gets plain text without an LLM where an API exists:
+   hiring.cafe description endpoint, Workday `/wday/cxs/<tenant>/<site>/job/...`,
+   Greenhouse boards API, Lever postings API, Ashby job-board API,
+   SmartRecruiters postings API, startup.jobs JobPosting JSON-LD. Otherwise the
+   model is told to WebFetch the apply URL.
+2. `run_claude` calls `claude -p --model sonnet --allowedTools WebSearch WebFetch --json-schema SCHEMA --output-format json`
+   (headless, subscription login, `--max-turns 14`). The prompt asks for what
+   the posting states (`statement`), citizenship/clearance requirements, the
+   employer's H-1B history (`company_verdict` with dated counts and URLs),
+   new-grad fit and an overall `verdict`/`fit_score`.
+3. Results go to the `screenings` table (one row per job, `status` ok|failed,
+   evidence and sources as JSON). The company part is cached in
+   `company_sponsorship` keyed by a normalized company name for
+   `company_cache_days`; a cached company is passed into the prompt and the
+   web search is skipped.
+4. `screen_batch` runs a thread pool (`concurrency`) but serializes jobs of the
+   same company so the first one fills the cache.
+
+Measured: ~25-35 s and ~$0.17 of subscription usage per job with the search,
+~10 s with a cached company. `Store.query` and `/api/jobs` attach the
+screening to each row; `POST /api/screen {job_id}` screens one job in a
+background thread ("Screen now" button); Excel has Sponsor?/Fit/Screening columns.
+
 ## Apply engine (`apply_engine.py`)
 
 One application = one headless Claude Code run on the user's subscription:
@@ -249,6 +279,7 @@ jobFilter/scheduler.py     foreground interval loop
 jobFilter/profile.py       setup/profile.json, setup/answers.json, resume text
 .claude/skills/apply-job/  the form-filling skill Claude follows and extends
 setup/                     user setup (gitignored) + tracked templates
+jobFilter/screen.py        post-fetch LLM screening (sponsorship + fit), company cache
 jobFilter/apply_engine.py  Claude Code + Chrome runner, worker thread
 jobFilter/cli.py           argparse entry point
 bin/jobfilter              service control script

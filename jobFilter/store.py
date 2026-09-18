@@ -60,6 +60,29 @@ CREATE TABLE IF NOT EXISTS questions (
     created_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS questions_status ON questions(status);
+CREATE TABLE IF NOT EXISTS screenings (
+    job_id        TEXT PRIMARY KEY REFERENCES jobs(id),
+    status        TEXT NOT NULL,            -- ok | failed
+    verdict       TEXT,                     -- likely | unlikely | unknown  (will this employer sponsor?)
+    statement     TEXT,                     -- what the posting itself says: sponsors | no_sponsorship | not_mentioned
+    requires_citizenship INTEGER,
+    new_grad_fit  INTEGER,
+    fit_score     INTEGER,
+    summary       TEXT,
+    evidence_json TEXT,
+    sources_json  TEXT,
+    model         TEXT,
+    cost_usd      REAL,
+    screened_at   TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS company_sponsorship (
+    company_key   TEXT PRIMARY KEY,         -- normalized company name
+    company       TEXT,
+    verdict       TEXT,                     -- likely | unlikely | unknown
+    evidence_json TEXT,
+    sources_json  TEXT,
+    updated_at    TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS runs (
     run_id      TEXT PRIMARY KEY,
     started_at  TEXT NOT NULL,
@@ -176,7 +199,11 @@ class Store:
         if limit:
             sql += " LIMIT ?"
             params.append(limit)
-        return [self._row(r) for r in self.conn.execute(sql, params).fetchall()]
+        rows = [self._row(r) for r in self.conn.execute(sql, params).fetchall()]
+        screens = self.screening_map([r["id"] for r in rows]) if rows else {}
+        for r in rows:
+            r["screening"] = screens.get(r["id"])
+        return rows
 
     def dates(self) -> list[dict[str, Any]]:
         rows = self.conn.execute(
@@ -194,6 +221,64 @@ class Store:
     def runs(self, limit: int = 50) -> list[dict[str, Any]]:
         rows = self.conn.execute("SELECT run_id, started_at, fetched, kept, new_jobs FROM runs ORDER BY started_at DESC LIMIT ?", (limit,)).fetchall()
         return [dict(r) for r in rows]
+
+    # ----- screenings ------------------------------------------------------
+    def save_screening(self, job_id: str, data: dict[str, Any]) -> None:
+        self.conn.execute(
+            """INSERT OR REPLACE INTO screenings (job_id, status, verdict, statement, requires_citizenship, new_grad_fit,
+                                                  fit_score, summary, evidence_json, sources_json, model, cost_usd, screened_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (job_id, data.get("status", "ok"), data.get("verdict"), data.get("statement"),
+             None if data.get("requires_citizenship") is None else int(bool(data["requires_citizenship"])),
+             None if data.get("new_grad_fit") is None else int(bool(data["new_grad_fit"])),
+             data.get("fit_score"), data.get("summary"), json.dumps(data.get("evidence") or []),
+             json.dumps(data.get("sources") or []), data.get("model"), data.get("cost_usd"), _iso()))
+        self.conn.commit()
+
+    def screening_map(self, job_ids: Optional[list[str]] = None) -> dict[str, dict[str, Any]]:
+        sql = "SELECT * FROM screenings"
+        params: list[Any] = []
+        if job_ids is not None:
+            if not job_ids:
+                return {}
+            sql += f" WHERE job_id IN ({','.join('?' * len(job_ids))})"
+            params = list(job_ids)
+        out = {}
+        for r in self.conn.execute(sql, params).fetchall():
+            d = dict(r)
+            d["evidence"] = json.loads(d.pop("evidence_json") or "[]")
+            d["sources"] = json.loads(d.pop("sources_json") or "[]")
+            out[d["job_id"]] = d
+        return out
+
+    def unscreened(self, limit: int = 50, since_hours: Optional[float] = None) -> list[dict[str, Any]]:
+        sql = "SELECT j.* FROM jobs j LEFT JOIN screenings s ON s.job_id = j.id WHERE s.job_id IS NULL"
+        params: list[Any] = []
+        if since_hours is not None:
+            sql += " AND j.first_seen >= ?"
+            params.append((utc_now() - timedelta(hours=since_hours)).isoformat(timespec="seconds"))
+        sql += " ORDER BY j.first_seen DESC LIMIT ?"
+        params.append(limit)
+        return [self._row(r) for r in self.conn.execute(sql, params).fetchall()]
+
+    def company_sponsorship(self, company_key: str, max_age_days: float = 30) -> Optional[dict[str, Any]]:
+        r = self.conn.execute("SELECT * FROM company_sponsorship WHERE company_key = ?", (company_key,)).fetchone()
+        if not r:
+            return None
+        age = (utc_now() - datetime.fromisoformat(r["updated_at"])).total_seconds() / 86400
+        if age > max_age_days:
+            return None
+        d = dict(r)
+        d["evidence"] = json.loads(d.pop("evidence_json") or "[]")
+        d["sources"] = json.loads(d.pop("sources_json") or "[]")
+        return d
+
+    def save_company_sponsorship(self, company_key: str, company: str, verdict: str,
+                                 evidence: list[str], sources: list[str]) -> None:
+        self.conn.execute(
+            "INSERT OR REPLACE INTO company_sponsorship (company_key, company, verdict, evidence_json, sources_json, updated_at) VALUES (?,?,?,?,?,?)",
+            (company_key, company, verdict, json.dumps(evidence), json.dumps(sources), _iso()))
+        self.conn.commit()
 
     # ----- applications --------------------------------------------------
     def queue_application(self, job_id: str, engine: str = "claude-chrome") -> dict[str, Any]:

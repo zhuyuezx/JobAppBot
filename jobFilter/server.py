@@ -3,6 +3,7 @@
     python -m jobFilter serve            # http://127.0.0.1:8765
 
 Jobs:          GET /api/dates, /api/jobs?since=24|date=YYYY-MM-DD, /api/job?id=, /api/runs
+Screening:     POST /api/screen {job_id}  (background; /api/jobs rows carry `screening`)
 Applications:  GET /api/engine, /api/applications?status=, /api/application?id=, /api/log?id=&lines=
                POST /api/applications/queue {job_id}, /status {job_id,status,note}, /retry {job_id}
                POST /api/questions/answer {id, answer, save}
@@ -65,8 +66,10 @@ def make_handler(store: Store):
                     since = q.get("since")
                     rows = store.query(since_hours=float(since) if since else None, date=q.get("date"))
                     apps = {a["job_id"]: a["status"] for a in store.list_applications()}
+                    screens = store.screening_map([r["id"] for r in rows])
                     for r in rows:
                         r["app_status"] = apps.get(r["id"])
+                        r["screening"] = screens.get(r["id"])
                     self._json(rows)
                 elif p == "/api/job":
                     row = store.get(q.get("id", ""))
@@ -118,7 +121,22 @@ def make_handler(store: Store):
             p = urllib.parse.urlparse(self.path).path
             b = self._body()
             try:
-                if p == "/api/applications/queue":
+                if p == "/api/screen":
+                    import threading
+                    from jobFilter import screen
+                    row = store.get(b.get("job_id", ""))
+                    if not row:
+                        return self._json({"error": "unknown job"}, 404)
+                    cfg = json.loads((Path(__file__).resolve().parent.parent / "setup" / "search.json").read_text())
+                    scfg = screen.screening_config(cfg)
+                    def _go(r=row):
+                        try:
+                            screen.screen_job(Store(store.path), r, scfg)
+                        except Exception as e:
+                            Store(store.path).save_screening(r["id"], {"status": "failed", "summary": str(e)[:300], "model": scfg["model"]})
+                    threading.Thread(target=_go, daemon=True).start()
+                    self._json({"started": True})
+                elif p == "/api/applications/queue":
                     if not store.get(b.get("job_id", "")):
                         return self._json({"error": "unknown job"}, 404)
                     apply_engine.start_worker(store.path)

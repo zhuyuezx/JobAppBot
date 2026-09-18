@@ -52,6 +52,27 @@ answers and resume are in one place. They are gitignored; only the templates are
 
 The banner at the top of the **Applications** tab shows a check mark for each of these once it's ready.
 
+## Automatic sponsorship screening
+
+After every hourly scan, each new job is screened by a small Claude model
+(Sonnet, on your subscription, no API key). It reads the posting, web-searches
+the employer's H-1B history, and writes a verdict you can see in the list:
+
+| Badge | Meaning |
+|---|---|
+| sponsor: likely · fit 8 | posting says it sponsors, or the company files H-1Bs regularly and the role is new-grad level |
+| sponsor: unknown | nothing stated and no clear history |
+| sponsor: unlikely | posting says no sponsorship, requires citizenship or a clearance, or the company has no filing history |
+| unscreened | not screened yet (the next scan will do it, or click *Screen now* in the job) |
+
+Open a job to read the reasoning: the quoted sentences from the posting, the
+company facts with sources, and the fit score. Tick **hide unlikely sponsors**
+to review only what's worth applying to. Each company's history is looked up
+once and reused for a month, so most screenings take under 30 seconds.
+
+Settings live in the `screening` block of `setup/search.json` (model, jobs per
+scan, on/off). `jobfilter py screen` runs it by hand.
+
 ## Applying with Claude
 
 1. **Jobs** tab: open a job, click **Prepare application with Claude**.
@@ -86,6 +107,7 @@ Applications run one at a time. Queue several and come back later.
 | `jobfilter stop` / `jobfilter start` | Pause / resume hourly scanning |
 | `jobfilter log` | See what the last scans did |
 | `jobfilter py apply list` | Application statuses in the terminal |
+| `jobfilter py screen --limit 20` | Screen unscreened jobs now (also `--job <id>` to redo one) |
 
 ## Where the jobs come from
 

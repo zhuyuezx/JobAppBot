@@ -108,6 +108,15 @@ def cmd_run(args) -> int:
         log(f"{len(new)} new (db now {store.count()} jobs)")
         if args.new_only:
             to_print = new
+        # Post-fetch screening of the new jobs (sponsorship + fit) with a small model.
+        from jobFilter import screen
+        scfg = screen.screening_config(cfg)
+        if scfg.get("enabled") and not args.no_screen:
+            todo = store.unscreened(limit=int(scfg.get("max_per_run", 40)))
+            if todo:
+                log(f"screening {len(todo)} unscreened job(s) with {scfg['model']} (cap {scfg.get('max_per_run')}/run)")
+                counts = screen.screen_batch(store, todo, scfg, log=log)
+                log(f"screened: {counts}")
         # Daily collection: regenerate today's workbook from everything first seen today.
         from jobFilter.excel import write_excel
         daily = write_excel(store.query(date=today_local()), EXCEL_DIR / f"{today_local()}.xlsx", today_local())
@@ -181,6 +190,28 @@ def cmd_schedule(args) -> int:
     return 0
 
 
+def cmd_screen(args) -> int:
+    from jobFilter import screen
+    from jobFilter.store import Store
+    cfg = load_config(args.config)
+    scfg = screen.screening_config(cfg)
+    if args.model:
+        scfg["model"] = args.model
+    store = Store(DB_PATH)
+    if args.job:
+        rows = [r for r in store.query() if r["id"].startswith(args.job)]
+        if len(rows) != 1:
+            log(f"{len(rows)} jobs match '{args.job}'"); return 1
+    else:
+        rows = store.unscreened(limit=args.limit, since_hours=args.since)
+    if not rows:
+        log("nothing to screen"); return 0
+    log(f"screening {len(rows)} job(s) with {scfg['model']}")
+    counts = screen.screen_batch(store, rows, scfg, log=log)
+    log(f"done: {counts}")
+    return 0
+
+
 def cmd_profile(args) -> int:
     from jobFilter import profile as prof
     if args.action == "init":
@@ -222,7 +253,7 @@ def cmd_apply(args) -> int:
 
 
 # ----- parser -------------------------------------------------------------
-SUBCOMMANDS = {"run", "validate", "list", "excel", "serve", "schedule", "apply", "profile"}
+SUBCOMMANDS = {"run", "validate", "list", "excel", "serve", "schedule", "apply", "profile", "screen"}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -237,7 +268,15 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--new-only", action="store_true", help="print only jobs not seen in earlier runs")
     r.add_argument("--xlsx", type=Path, help="also write this run's list to an .xlsx file")
     r.add_argument("--max-pages", type=int, default=25)
+    r.add_argument("--no-screen", action="store_true", help="skip the post-fetch LLM screening")
     r.set_defaults(func=cmd_run)
+
+    sc2 = sub.add_parser("screen", help="LLM-screen jobs for sponsorship / fit (default: unscreened ones)")
+    sc2.add_argument("--limit", type=int, default=40)
+    sc2.add_argument("--since", type=float, metavar="HOURS", help="only jobs first seen within the last N hours")
+    sc2.add_argument("--job", help="job id prefix: (re)screen this one job")
+    sc2.add_argument("--model", help="override the model, e.g. sonnet, opus, haiku")
+    sc2.set_defaults(func=cmd_screen)
 
     v = sub.add_parser("validate", help="check config search_state keys/values against hiring.cafe's schema")
     v.set_defaults(func=cmd_validate)

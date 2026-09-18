@@ -32,6 +32,10 @@
   .badge.ok { background:var(--ok); color:var(--okfg); } .badge.warn { background:var(--warn); color:var(--warnfg); } .badge.bad { background:var(--bad); color:var(--badfg); }
   .details { display:none; padding: 4px 6px 16px 6px; cursor:default; }
   .open .details { display:block; }
+  .chk { display:flex; align-items:center; gap:6px; color:var(--muted); font-size:13px; white-space:nowrap; }
+  .badge.sp-likely { background:var(--ok); color:var(--okfg); } .badge.sp-unlikely { background:var(--bad); color:var(--badfg); } .badge.sp-unknown { background:var(--chip); color:var(--muted); } .badge.sp-pending { background:transparent; border:1px dashed var(--line); color:var(--muted); }
+  .screen { border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin:6px 0 10px; }
+  .screen .sum { margin:0 0 6px; } .screen ul { margin:4px 0 0 18px; padding:0; } .screen li { margin:2px 0; } .screen .src a { margin-right:10px; font-size:12px; }
   .chev { display:inline-block; width:14px; margin-right:6px; color:var(--muted); font-size:11px; transition:transform .12s; vertical-align:middle; }
   .open .chev { transform:rotate(90deg); }
   .kv { display:grid; grid-template-columns: 150px 1fr; gap:4px 12px; margin:6px 0 10px; }
@@ -80,6 +84,7 @@
       <button data-src="all" class="on">All sources</button>
     </div>
     <input id="q" type="search" placeholder="filter title / company / location">
+    <label class="chk" title="hide jobs the screening marked as unlikely to sponsor"><input type="checkbox" id="hideUnlikely"> hide unlikely sponsors</label>
   </div>
   <span class="count" id="count"></span>
 </header>
@@ -125,6 +130,28 @@ const VIA_LABEL = { hiringcafe: 'hiring.cafe', simplify: 'Simplify', startupjobs
 const STATUS_CLASS = { queued: '', running: 'warn', review_ready: 'ok', needs_answer: 'warn', needs_login: 'warn', captcha: 'warn', already_applied: '', failed: 'bad', submitted: 'ok', skipped: '' };
 const STATUS_LABEL = { queued: 'queued', running: 'Claude is working', review_ready: 'ready to submit', needs_answer: 'needs your answer', needs_login: 'needs login / code', captcha: 'CAPTCHA', already_applied: 'already applied', failed: 'failed', submitted: 'submitted', skipped: 'skipped' };
 const badge = st => st ? `<span class="badge ${STATUS_CLASS[st] || ''}">${esc(STATUS_LABEL[st] || st)}</span>` : '';
+const SP_LABEL = { likely: 'sponsor: likely', unlikely: 'sponsor: unlikely', unknown: 'sponsor: unknown' };
+function spBadge(sc) {
+  if (!sc) return '<span class="badge sp-pending" title="not screened yet">unscreened</span>';
+  if (sc.status !== 'ok') return '<span class="badge sp-pending" title="screening failed">screen failed</span>';
+  const v = sc.verdict || 'unknown';
+  return `<span class="badge sp-${esc(v)}" title="${esc(sc.summary || '')}">${esc(SP_LABEL[v] || v)}${sc.fit_score != null ? ' · fit ' + sc.fit_score : ''}</span>`;
+}
+function screenBlock(r) {
+  const sc = r.screening;
+  const btn = `<button class="btn" data-act="screen">${sc ? 'Screen again' : 'Screen now'}</button>`;
+  if (!sc) return `<div class="screen"><p class="sum muted" style="white-space:normal">Not screened yet. New jobs are screened automatically after each hourly scan.</p>${btn}</div>`;
+  if (sc.status !== 'ok') return `<div class="screen"><p class="sum">Screening failed: ${esc(sc.summary || '')}</p>${btn}</div>`;
+  const ev = (sc.evidence || []).map(e => `<li>${esc(e)}</li>`).join('');
+  const src = (sc.sources || []).map(u => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(u.replace(/^https?:\/\//, '').split('/')[0])}</a>`).join('');
+  return `<div class="screen">
+    <p class="sum">${spBadge(sc)} ${esc(sc.summary || '')}</p>
+    <div class="muted" style="white-space:normal">posting says: <b>${esc(sc.statement || '?')}</b>${sc.requires_citizenship ? ' · requires citizenship/clearance' : ''}${sc.new_grad_fit === 0 ? ' · not a new-grad role' : ''} · ${esc(sc.model || '')} · ${fmt(sc.screened_at)}</div>
+    ${ev ? `<ul>${ev}</ul>` : ''}
+    ${src ? `<div class="src">${src}</div>` : ''}
+    <div class="actions">${btn}</div>
+  </div>`;
+}
 
 // ---------------- tabs ----------------
 let tab = 'jobs';
@@ -175,12 +202,13 @@ function rowHtml(r) {
   return `<div class="job" data-id="${esc(r.id)}">
       <div class="row">
         <div class="title"><span class="chev" aria-hidden="true">&#9654;</span><a href="${esc(link)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(j.title)}</a>
-          ${j.visa_sponsorship ? '<span class="badge ok">visa</span>' : ''}${isRecent(r.first_seen) ? '<span class="badge warn">new</span>' : ''}${(srcFilter === 'all') ? `<span class="badge" title="found via ${esc(j.via || 'hiringcafe')}">${esc(VIA_LABEL[j.via] || 'hiring.cafe')}</span>` : ''}${badge(r.app_status)}</div>
+          ${j.visa_sponsorship ? '<span class="badge ok">visa</span>' : ''}${isRecent(r.first_seen) ? '<span class="badge warn">new</span>' : ''}${(srcFilter === 'all') ? `<span class="badge" title="found via ${esc(j.via || 'hiringcafe')}">${esc(VIA_LABEL[j.via] || 'hiring.cafe')}</span>` : ''}${spBadge(r.screening)}${badge(r.app_status)}</div>
         <div class="muted" title="${esc(j.company)}">${esc(j.company)}</div>
         <div class="muted" title="${esc(j.location)}">${esc(j.location || '')}</div>
         <div class="found" title="found ${esc(fmt(r.first_seen))} · posted ${esc(fmt(j.published_at))}">found ${localTime(r.first_seen)}<small>posted ${esc((j.published_at || '').slice(0, 10))}</small></div>
       </div>
       <div class="details">
+        ${screenBlock(r)}
         ${jobDetails(j, r)}
         <div class="actions">
           ${r.app_status ? `<button class="btn" data-act="goapps">Open in Applications</button>` : `<button class="btn primary" data-act="prepare">Prepare application with Claude</button>`}
@@ -197,7 +225,9 @@ function render() {
   // Posting time is only day-accurate for most sources and "found" seconds differ per scan,
   // so sorting on either to the second scatters a company's postings; day granularity keeps them together.
   const postedDay = r => (r.job.published_at || '').slice(0, 10);
+  const hideUnlikely = $('#hideUnlikely').checked;
   const shown = rows.filter(r => srcFilter === 'all' || (r.job.via || 'hiringcafe') === srcFilter)
+                    .filter(r => !hideUnlikely || !(r.screening && r.screening.status === 'ok' && r.screening.verdict === 'unlikely'))
                     .filter(r => !q || [r.title, r.company, r.location].join(' ').toLowerCase().includes(q))
                     .sort((a, b) => localDay(b.first_seen).localeCompare(localDay(a.first_seen))
                                  || postedDay(b).localeCompare(postedDay(a))
@@ -240,10 +270,18 @@ $('#srcTabs').addEventListener('click', e => {
 });
 try { srcFilter = localStorage.getItem('jf.src') || 'all'; } catch (_) {}
 $('#q').addEventListener('input', render);
+$('#hideUnlikely').addEventListener('change', () => { try { localStorage.setItem('jf.hideUnlikely', $('#hideUnlikely').checked ? '1' : ''); } catch (_) {} render(); });
+try { $('#hideUnlikely').checked = localStorage.getItem('jf.hideUnlikely') === '1'; } catch (_) {}
 $('#list').addEventListener('click', async e => {
   const job = e.target.closest('.job'); if (!job) return;
   const act = e.target.closest('[data-act]');
   if (act) {
+    if (act.dataset.act === 'screen') {
+      act.disabled = true; act.textContent = 'Screening... (about 30s)';
+      await api('/api/screen', { job_id: job.dataset.id });
+      const poll = async (n) => { await new Promise(res => setTimeout(res, 5000)); await load(); const row = rows.find(x => x.id === job.dataset.id); if (row && row.screening && n < 24) { /* done */ } else if (n < 24) poll(n + 1); };
+      poll(0); return;
+    }
     if (act.dataset.act === 'prepare') {
       act.disabled = true; act.textContent = 'Queued...';
       const r = await api('/api/applications/queue', { job_id: job.dataset.id });

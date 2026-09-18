@@ -26,6 +26,9 @@ COLUMNS: list[tuple[str, str, int]] = [
     ("Requirements", "requirements_summary", 80),
     ("Apply URL", "apply_url", 60),
     ("hiring.cafe URL", "hc_url", 60),
+    ("Sponsor?", "sponsor", 11),
+    ("Fit", "fit", 6),
+    ("Screening", "screen_summary", 70),
     ("ATS", "source", 12),
     ("Via", "via", 12),
 ]
@@ -52,6 +55,9 @@ def flatten(row: dict[str, Any]) -> dict[str, Any]:
         "hc_url": row.get("hc_url") or job.get("hc_url"),
         "source": job.get("source"),
         "via": job.get("via") or row.get("via") or "hiringcafe",
+        "sponsor": (row.get("screening") or {}).get("verdict") or "",
+        "fit": (row.get("screening") or {}).get("fit_score"),
+        "screen_summary": (row.get("screening") or {}).get("summary") or "",
     }
 
 
