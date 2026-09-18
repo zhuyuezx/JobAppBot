@@ -56,8 +56,12 @@ class Job:
         return f"{u.netloc.lower()}{path}" + (("?" + urllib.parse.urlencode(sorted(qs))) if qs else "")
 
     def norm_key(self) -> str:
-        """Company + title, lowercased and stripped of punctuation."""
-        return re.sub(r"[^a-z0-9]+", " ", f"{self.company} {self.title}".lower()).strip()
+        """Company + title + location, lowercased and stripped of punctuation.
+
+        Location is part of the key on purpose: the same title in two cities
+        is two positions (Visa posts one "Software Engineer New Grad" per office).
+        """
+        return re.sub(r"[^a-z0-9]+", " ", f"{self.company} {self.title} {self.location or ''}".lower()).strip()
 
     def to_dict(self, include_raw: bool = False) -> dict[str, Any]:
         d = asdict(self)

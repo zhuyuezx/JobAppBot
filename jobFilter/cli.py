@@ -139,7 +139,13 @@ def cmd_list(args) -> int:
     rows = _select_rows(store, args)
     if args.source:
         rows = [r for r in rows if (r["job"].get("via") or "hiringcafe") == args.source]
-    rows.sort(key=lambda r: r["first_seen"], reverse=True)
+    # day found desc, posting day desc; within a day keep a company's postings together
+    rows.sort(key=lambda r: (r["first_seen"][:10], (r["job"].get("published_at") or "")[:10]), reverse=True)
+    from itertools import groupby
+    ordered = []
+    for _, grp in groupby(rows, key=lambda r: (r["first_seen"][:10], (r["job"].get("published_at") or "")[:10])):
+        ordered += sorted(grp, key=lambda r: ((r["job"].get("company") or "").lower(), r["job"].get("title") or "", r["job"].get("location") or ""))
+    rows = ordered
     by_via: dict[str, list] = {}
     for r in rows:
         by_via.setdefault(r["job"].get("via") or "hiringcafe", []).append(r)

@@ -35,7 +35,10 @@ slugs -> `Software Development`. Countries are guessed from location strings
 
 Cross-source dedup lives in `Store.upsert_many`: a job is a repeat if its id,
 hiring.cafe dedup cluster, normalized apply URL (`Job.norm_url`, tracking
-params stripped) or normalized company+title (`Job.norm_key`) already exists.
+params stripped) or normalized company+title+location (`Job.norm_key`) already
+exists. Location is part of the key because the same title in two cities is
+two positions; `NORM_KEY_VERSION` in `store.py` (stored as SQLite
+`user_version`) forces a recompute of stored keys when the formula changes.
 The `jobs` table has `via`, `norm_url`, `norm_key` columns (added by
 `Store._migrate` on older databases). A source that throws is logged and
 skipped; the scan continues with the others. The `sources` block of

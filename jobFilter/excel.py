@@ -80,11 +80,27 @@ def _fill_sheet(ws, rows: list[dict[str, Any]]) -> None:
         ws.auto_filter.ref = ws.dimensions
 
 
+def _stable_group(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Within equal (found day, posted day) buckets, order by company, title, location."""
+    out: list[dict[str, Any]] = []
+    bucket: list[dict[str, Any]] = []
+    key = lambda r: ((r.get("first_seen_date") or (r.get("first_seen") or "")[:10]), (r["job"].get("published_at") or "")[:10])
+    for r in rows:
+        if bucket and key(bucket[-1]) != key(r):
+            out += sorted(bucket, key=lambda x: ((x["job"].get("company") or "").lower(), x["job"].get("title") or "", x["job"].get("location") or ""))
+            bucket = []
+        bucket.append(r)
+    out += sorted(bucket, key=lambda x: ((x["job"].get("company") or "").lower(), x["job"].get("title") or "", x["job"].get("location") or ""))
+    return out
+
+
 def write_excel(rows: list[dict[str, Any]], path: str | Path, sheet_title: str = "jobs") -> Path:
     """One workbook: sheet 'all' (newest discovery first) plus one sheet per source."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    rows = sorted(rows, key=lambda r: (r.get("first_seen") or "", r["job"].get("published_at") or ""), reverse=True)
+    # same order as the web page: day found desc, posting day desc, then company / title / location
+    rows = sorted(rows, key=lambda r: (r.get("first_seen_date") or (r.get("first_seen") or "")[:10], (r["job"].get("published_at") or "")[:10]), reverse=True)
+    rows = _stable_group(rows)
     wb = Workbook()
     ws = wb.active
     ws.title = "all"

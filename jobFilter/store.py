@@ -79,6 +79,8 @@ def _iso() -> str:
     return utc_now().isoformat(timespec="seconds")
 
 
+NORM_KEY_VERSION = 2  # 1: company+title, 2: company+title+location
+
 APP_STATUSES = ("queued", "running", "review_ready", "needs_answer", "needs_login", "captcha",
                 "already_applied", "failed", "submitted", "skipped")
 
@@ -103,13 +105,17 @@ class Store:
             if col not in cols:
                 self.conn.execute(f"ALTER TABLE jobs ADD COLUMN {col} {ddl}")
                 added = True
-        if added or self.conn.execute("SELECT COUNT(*) FROM jobs WHERE norm_key IS NULL").fetchone()[0]:
-            for row in self.conn.execute("SELECT id, job_json FROM jobs WHERE norm_key IS NULL").fetchall():
+        # user_version tracks the norm_key formula; bump NORM_KEY_VERSION when it changes to force a recompute
+        stale_formula = self.conn.execute("PRAGMA user_version").fetchone()[0] < NORM_KEY_VERSION
+        if added or stale_formula or self.conn.execute("SELECT COUNT(*) FROM jobs WHERE norm_key IS NULL").fetchone()[0]:
+            where = "" if stale_formula else " WHERE norm_key IS NULL"
+            for row in self.conn.execute(f"SELECT id, job_json FROM jobs{where}").fetchall():
                 j = json.loads(row["job_json"])
                 job = Job(**{k: v for k, v in j.items() if k in Job.__dataclass_fields__ and k != "raw"})
                 self.conn.execute("UPDATE jobs SET norm_url = ?, norm_key = ?, via = ? WHERE id = ?",
                                   (job.norm_url(), job.norm_key(), job.via, row["id"]))
             self.conn.executescript("CREATE INDEX IF NOT EXISTS jobs_norm_url ON jobs(norm_url); CREATE INDEX IF NOT EXISTS jobs_norm_key ON jobs(norm_key);")
+            self.conn.execute(f"PRAGMA user_version = {NORM_KEY_VERSION}")
             self.conn.commit()
 
     # ----- writes --------------------------------------------------------
@@ -122,10 +128,12 @@ class Store:
         cur = self.conn.cursor()
         for job in jobs:
             nurl, nkey = job.norm_url(), job.norm_key()
-            # same posting seen before: by id, by hiring.cafe's dedup cluster, by apply URL, or by company+title
+            # same posting seen before: by id, by hiring.cafe's dedup cluster, by apply URL, or (only across
+            # sources; within one source the id is authoritative) by company+title+location
             row = cur.execute(
-                "SELECT id FROM jobs WHERE id = ? OR dedup_key = ? OR (norm_url IS NOT NULL AND norm_url = ?) OR (norm_key = ? AND norm_key != '')",
-                (job.id, job.dedup_key, nurl, nkey)).fetchone()
+                "SELECT id FROM jobs WHERE id = ? OR dedup_key = ? OR (norm_url IS NOT NULL AND norm_url = ?) "
+                "OR (norm_key = ? AND norm_key != '' AND via != ?)",
+                (job.id, job.dedup_key, nurl, nkey, job.via)).fetchone()
             if row:
                 cur.execute("UPDATE jobs SET last_seen = ?, seen_count = seen_count + 1 WHERE id = ?",
                             (now_iso, row["id"]))

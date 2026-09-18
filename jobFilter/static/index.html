@@ -51,6 +51,8 @@
   .ghead { display:flex; align-items:center; gap:10px; margin:18px 0 4px; padding:6px 6px; border-bottom:2px solid var(--line); font-weight:650; font-size:14px; position:sticky; top:58px; background:var(--bg); z-index:1; }
   .ghead .n { color:var(--muted); font-weight:500; }
   .found { white-space:nowrap; } .found small { display:block; color:var(--muted); font-weight:400; }
+  .job.run { border-left:3px solid var(--accent); } .job.run .row { padding-left:9px; }
+  .job.runstart { margin-top:6px; }
   .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
   table { border-collapse:collapse; width:100%; } td, th { text-align:left; padding:6px; border-bottom:1px solid var(--line); vertical-align:top; } th { color:var(--muted); font-weight:500; }
   @media (max-width: 800px) { .row { grid-template-columns: 1fr; gap:2px; } .kv, .grid2 { grid-template-columns: 1fr; } }
@@ -189,14 +191,27 @@ function rowHtml(r) {
 function render() {
   const q = $('#q').value.trim().toLowerCase();
   renderSrcTabs();
+  // Order: day found (desc) -> posting day (desc) -> company -> title -> location.
+  // Posting time is only day-accurate for most sources and "found" seconds differ per scan,
+  // so sorting on either to the second scatters a company's postings; day granularity keeps them together.
+  const postedDay = r => (r.job.published_at || '').slice(0, 10);
   const shown = rows.filter(r => srcFilter === 'all' || (r.job.via || 'hiringcafe') === srcFilter)
                     .filter(r => !q || [r.title, r.company, r.location].join(' ').toLowerCase().includes(q))
-                    .sort((a, b) => (b.first_seen || '').localeCompare(a.first_seen || '') || (b.job.published_at || '').localeCompare(a.job.published_at || ''));
+                    .sort((a, b) => localDay(b.first_seen).localeCompare(localDay(a.first_seen))
+                                 || postedDay(b).localeCompare(postedDay(a))
+                                 || (a.job.company || '').localeCompare(b.job.company || '', undefined, { sensitivity: 'base' })
+                                 || (a.job.title || '').localeCompare(b.job.title || '')
+                                 || (a.job.location || '').localeCompare(b.job.location || ''));
   $('#count').textContent = `${shown.length} job${shown.length === 1 ? '' : 's'}` + (srcFilter !== 'all' || q ? ` (of ${rows.length})` : '');
   if (!shown.length) { $('#list').innerHTML = '<div class="empty">Nothing here. Run <code>jobfilter run</code> to fetch.</div>'; return; }
   const groups = new Map();
   for (const r of shown) { const k = groupKey(r); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); }
-  $('#list').innerHTML = [...groups.keys()].map(k => `<div class="ghead">${esc(k)} <span class="n">${groups.get(k).length}</span></div>` + groups.get(k).map(rowHtml).join('')).join('');
+  const withRuns = list => list.map((r, i) => {
+    const same = x => x && (x.job.company || '').toLowerCase() === (r.job.company || '').toLowerCase();
+    const cls = same(list[i - 1]) || same(list[i + 1]) ? (same(list[i - 1]) ? 'run' : 'run runstart') : '';
+    return rowHtml(r).replace('<div class="job"', `<div class="job ${cls}"`);
+  });
+  $('#list').innerHTML = [...groups.keys()].map(k => `<div class="ghead">${esc(k)} <span class="n">${groups.get(k).length}</span></div>` + withRuns(groups.get(k)).join('')).join('');
 }
 async function load() {
   let path = '/api/jobs';
