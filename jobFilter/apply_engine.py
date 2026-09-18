@@ -171,12 +171,18 @@ At the end, return the structured result. In `lessons`, list only new reusable f
 """
 
 
-def resume_message(questions: list[dict[str, Any]], work_dir: Path) -> str:
-    lines = [f"- Q: {q['question']}\n  A: {q['answer']}" for q in questions]
-    return ("The user answered the open questions:\n" + "\n".join(lines) +
-            "\n\nGo back to the application tab, fill these answers in, continue to the review page, "
-            "take a screenshot with save_to_disk and report its path, and stop with status review_ready. "
-            "Never click Submit. Include any new reusable facts about this form in `lessons`.")
+def resume_message(questions: list[dict[str, Any]], work_dir: Path, after: Optional[str] = None) -> str:
+    parts = []
+    if after in ("needs_login", "captcha"):
+        parts.append("The user has finished the step you stopped at (account creation / sign-in / verification code / CAPTCHA) "
+                     "in the application tab. Find that tab (tabs_context_mcp), take a screenshot, re-read the page, and continue "
+                     "from its current state. Do not open the apply URL again and do not touch password fields.")
+    if questions:
+        lines = [f"- Q: {q['question']}\n  A: {q['answer']}" for q in questions]
+        parts.append("The user answered the open questions:\n" + "\n".join(lines) + "\n\nFill these answers in.")
+    parts.append("Continue to the review page, take a screenshot with save_to_disk and report its path, and stop with status "
+                 "review_ready. Never click Submit. Include any new reusable facts about this form in `lessons`.")
+    return "\n\n".join(parts)
 
 
 # ----- running -------------------------------------------------------------
@@ -211,8 +217,11 @@ def run_application(store: Store, app: dict[str, Any]) -> dict[str, Any]:
         return {"status": "failed"}
 
     answered = [q for q in store.questions(job_id=job_id, status="answered")]
-    resuming = bool(app.get("session_id")) and bool(answered)
-    prompt = resume_message(answered, work_dir) if resuming else build_prompt(app, work_dir)
+    last_status = (app.get("result") or {}).get("status")
+    # Resume the same Claude session when the user answered questions or finished a login/CAPTCHA handoff;
+    # otherwise (first run, or a retry after a hard failure) start fresh.
+    resuming = bool(app.get("session_id")) and (bool(answered) or last_status in ("needs_login", "captcha"))
+    prompt = resume_message(answered, work_dir, after=last_status) if resuming else build_prompt(app, work_dir)
 
     settings = effective_settings()
     cmd = [claude, "-p", prompt, "--chrome", "--output-format", "stream-json", "--verbose",

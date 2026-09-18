@@ -30,8 +30,10 @@
   .muted { color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .badge { display:inline-block; font-size:11px; padding:1px 7px; border-radius:999px; background:var(--chip); color:var(--fg); margin-left:6px; vertical-align:middle; white-space:nowrap; }
   .badge.ok { background:var(--ok); color:var(--okfg); } .badge.warn { background:var(--warn); color:var(--warnfg); } .badge.bad { background:var(--bad); color:var(--badfg); }
-  .details { display:none; padding: 4px 6px 16px 6px; }
+  .details { display:none; padding: 4px 6px 16px 6px; cursor:default; }
   .open .details { display:block; }
+  .chev { display:inline-block; width:14px; margin-right:6px; color:var(--muted); font-size:11px; transition:transform .12s; vertical-align:middle; }
+  .open .chev { transform:rotate(90deg); }
   .kv { display:grid; grid-template-columns: 150px 1fr; gap:4px 12px; margin:6px 0 10px; }
   .kv dt { color:var(--muted); } .kv dd { margin:0; }
   .links a { display:inline-block; margin-right:14px; color:var(--accent); }
@@ -172,7 +174,7 @@ function rowHtml(r) {
   const j = r.job, link = j.apply_url || r.hc_url;
   return `<div class="job" data-id="${esc(r.id)}">
       <div class="row">
-        <div class="title"><a href="${esc(link)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(j.title)}</a>
+        <div class="title"><span class="chev" aria-hidden="true">&#9654;</span><a href="${esc(link)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(j.title)}</a>
           ${j.visa_sponsorship ? '<span class="badge ok">visa</span>' : ''}${isRecent(r.first_seen) ? '<span class="badge warn">new</span>' : ''}${(srcFilter === 'all') ? `<span class="badge" title="found via ${esc(j.via || 'hiringcafe')}">${esc(VIA_LABEL[j.via] || 'hiring.cafe')}</span>` : ''}${badge(r.app_status)}</div>
         <div class="muted" title="${esc(j.company)}">${esc(j.company)}</div>
         <div class="muted" title="${esc(j.location)}">${esc(j.location || '')}</div>
@@ -251,6 +253,7 @@ $('#list').addEventListener('click', async e => {
     return;
   }
   if (e.target.closest('a')) return;
+  if (!e.target.closest('.row')) return;          // clicks inside the expanded details do nothing
   job.classList.toggle('open');
 });
 
@@ -319,7 +322,7 @@ function renderApps() {
   apps.sort((x, y) => order.indexOf(x.status) - order.indexOf(y.status) || (y.updated_at > x.updated_at ? 1 : -1));
   $('#apps').innerHTML = apps.map(a => `<div class="app ${openApp === a.job_id ? 'open' : ''}" data-id="${esc(a.job_id)}">
       <div class="row">
-        <div class="title"><a href="${esc(a.job.apply_url || a.hc_url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(a.job.title)}</a>${badge(a.status)}${a.open_questions ? `<span class="badge warn">${a.open_questions} question${a.open_questions > 1 ? 's' : ''}</span>` : ''}</div>
+        <div class="title"><span class="chev" aria-hidden="true">&#9654;</span><a href="${esc(a.job.apply_url || a.hc_url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(a.job.title)}</a>${badge(a.status)}${a.open_questions ? `<span class="badge warn">${a.open_questions} question${a.open_questions > 1 ? 's' : ''}</span>` : ''}</div>
         <div class="muted">${esc(a.job.company)}</div>
         <div class="muted">${esc(a.summary || '').slice(0, 80)}</div>
         <div class="muted">${fmt(a.updated_at)}</div>
@@ -351,7 +354,8 @@ $('#apps').addEventListener('click', async e => {
     }
     await loadApps(); return;
   }
-  if (e.target.closest('a') || e.target.closest('input')) return;
+  if (e.target.closest('a') || e.target.closest('input') || e.target.closest('textarea')) return;
+  if (!e.target.closest('.row')) return;          // only the header bar toggles; the details area is inert
   openApp = openApp === id ? null : id;
   await loadApps();
 });
