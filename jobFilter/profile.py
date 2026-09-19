@@ -1,9 +1,9 @@
 """Applicant profile, answer bank and resume access for the apply engine.
 
 Files:
-    setup/profile.json          structured facts, see setup/profile.template.json   (committed)
-    setup/answers.json          [{id, question, answer, updated}] reused across applications (committed)
-    setup/resume/*.pdf          the file to upload; newest is used                   (committed)
+    setup/profile.json          structured facts, see setup/profile.template.json   (local, ignored)
+    setup/answers.json          [{id, question, answer, updated}] reused across applications (local, ignored)
+    setup/resume/*.pdf          the file to upload; newest is used                   (local, ignored)
     data/profile/resume.txt     cached text extraction of the resume                 (local)
     data/profile/settings.json  engine settings such as the model                    (local)
 """
@@ -15,6 +15,8 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
+from jobFilter.providers import CLAUDE, migrate_engine, validate_engine
+
 ROOT = Path(__file__).resolve().parent.parent
 SETUP_DIR = ROOT / "setup"
 PROFILE_DIR = ROOT / "data" / "profile"          # local caches and settings
@@ -23,7 +25,8 @@ ANSWERS_PATH = SETUP_DIR / "answers.json"
 RESUME_TEXT_PATH = PROFILE_DIR / "resume.txt"
 RESUME_DIR = SETUP_DIR / "resume"
 SETTINGS_PATH = PROFILE_DIR / "settings.json"
-DEFAULT_SETTINGS: dict[str, Any] = {"model": "opus", "max_turns": 120}
+DEFAULT_SETTINGS: dict[str, Any] = {"engine": CLAUDE, "model": "opus", "max_turns": 120,
+                                  "codex_model": "", "codex_timeout": 900}
 MODEL_CHOICES = ["opus", "sonnet", "haiku"]
 TEMPLATE_PATH = SETUP_DIR / "profile.template.json"
 
@@ -182,15 +185,22 @@ def load_settings() -> dict[str, Any]:
             data.update(json.loads(SETTINGS_PATH.read_text()))
         except ValueError:
             pass
+    data["engine"] = migrate_engine(data["engine"])
     return data
 
 
 def save_settings(updates: dict[str, Any]) -> dict[str, Any]:
     data = load_settings()
+    if "engine" in updates:
+        data["engine"] = validate_engine(updates["engine"])
     if "model" in updates:
         data["model"] = str(updates["model"]).strip() or DEFAULT_SETTINGS["model"]
     if "max_turns" in updates:
         data["max_turns"] = max(10, min(400, int(updates["max_turns"])))
+    if "codex_model" in updates:
+        data["codex_model"] = str(updates["codex_model"]).strip()
+    if "codex_timeout" in updates:
+        data["codex_timeout"] = max(30, min(3600, int(updates["codex_timeout"])))
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)
     SETTINGS_PATH.write_text(json.dumps(data, indent=2) + "\n")
     return data

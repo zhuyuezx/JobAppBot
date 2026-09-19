@@ -18,9 +18,14 @@ flowchart LR
 
 1. **Find**: three sources are searched with your filters; each job is stored once.
 2. **Screen**: a small Claude model reads the posting and looks up the company's H-1B history. Each job gets a badge: `sponsor: likely`, `unknown`, or `unlikely`, plus a fit score. Tick *hide unlikely sponsors* to see only what's worth your time.
-3. **Apply**: click *Prepare application with Claude*. It fills the form in your Chrome, asks you when it can't answer something, and stops on the review page.
+3. **Apply**: click *Prepare with Claude* or *Prepare with GPT*. It fills the form in your Chrome, asks you when it can't answer something, and stops on the review page.
 
-Everything runs on your Claude subscription. No API key.
+By default, everything runs on your Claude subscription. No API key.
+
+**ChatGPT subscription support:** Codex can screen jobs and fill applications automatically.
+Choose **AI settings → Application filling → ChatGPT / Codex**, save, then
+click **Prepare with GPT**. The managed browser bridge uses a dedicated Chrome profile;
+questions and results appear in jobFilter. See [setup and usage](docs/CODEX_INTEGRATION.md).
 
 ## Quick start
 
@@ -51,7 +56,8 @@ To let Claude work in your browser (one time): install the [Claude in Chrome](ht
 | `jobfilter log` | what the last scans did |
 
 **On the web page**
-- *Jobs*: pick a source tab or all; rows are grouped by the day they were found. Open a row to see the screening reasoning, then *Prepare application with Claude*.
+- *AI settings*: choose Claude or ChatGPT separately for job screening and application filling, then save each choice. Both providers start application filling automatically.
+- *Jobs*: pick a source tab or all; rows are grouped by the day they were found. Open a row to see the screening reasoning, then *Prepare with Claude* or *Prepare with GPT*.
 - *Applications*: watch Claude work, answer the questions it parks for you (they're remembered), open the tab and press Submit, mark it submitted.
 - *Profile*: edit your details and the answer bank.
 

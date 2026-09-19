@@ -21,11 +21,13 @@ from typing import Any
 
 from jobFilter import apply_engine, profile as prof
 from jobFilter.store import APP_STATUSES, Store
+from jobFilter import application_state
 
 STATIC_DIR = Path(__file__).parent / "static"
 
 
-def make_handler(store: Store):
+def make_handler(store: Store, config_path: Path | None = None):
+    config_path = config_path or Path(__file__).resolve().parent.parent / "setup" / "search.json"
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):
             if "/api/" in (args[0] if args else ""):
@@ -60,6 +62,9 @@ def make_handler(store: Store):
             try:
                 if p in ("/", "/index.html"):
                     self._send(200, (STATIC_DIR / "index.html").read_bytes(), "text/html; charset=utf-8")
+                elif p in ("/static/app.js", "/static/styles.css"):
+                    content_type = "text/javascript" if p.endswith(".js") else "text/css"
+                    self._send(200, (STATIC_DIR / Path(p).name).read_bytes(), content_type + "; charset=utf-8")
                 elif p == "/api/dates":
                     self._json(store.dates())
                 elif p == "/api/jobs":
@@ -103,11 +108,16 @@ def make_handler(store: Store):
                     self._json({"profile": prof.load_profile(), "status": prof.status()})
                 elif p == "/api/settings":
                     self._json(apply_engine.effective_settings())
+                elif p == "/api/screening-settings":
+                    from jobFilter import screen
+                    from jobFilter.codex import find_codex
+                    self._json({"settings": screen.screening_config(json.loads(config_path.read_text())),
+                                "codex_found": bool(find_codex()), "claude_found": bool(apply_engine.find_claude())})
                 elif p == "/api/answers":
                     self._json(prof.load_answers())
                 elif p == "/api/file":
                     path = Path(q.get("path", "")).resolve()
-                    if not str(path).startswith(str(apply_engine.APPLY_DIR.resolve())) or not path.exists():
+                    if not path.is_relative_to(application_state.APPLY_DIR.resolve()) or not path.exists():
                         return self._json({"error": "not found"}, 404)
                     ctype = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
                     self._send(200, path.read_bytes(), ctype)
@@ -127,20 +137,26 @@ def make_handler(store: Store):
                     row = store.get(b.get("job_id", ""))
                     if not row:
                         return self._json({"error": "unknown job"}, 404)
-                    cfg = json.loads((Path(__file__).resolve().parent.parent / "setup" / "search.json").read_text())
+                    cfg = json.loads(config_path.read_text())
                     scfg = screen.screening_config(cfg)
                     def _go(r=row):
+                        local = Store(store.path)
                         try:
-                            screen.screen_job(Store(store.path), r, scfg)
+                            screen.screen_job(local, r, scfg)
+                        except screen.CodexUnavailable as e:
+                            print(f"Codex screening paused: {e}", flush=True)
                         except Exception as e:
-                            Store(store.path).save_screening(r["id"], {"status": "failed", "summary": str(e)[:300], "model": scfg["model"]})
+                            local.save_screening(r["id"], {"status": "failed", "summary": str(e)[:300], "model": screen.model_label(scfg)})
+                        finally:
+                            local.close()
                     threading.Thread(target=_go, daemon=True).start()
                     self._json({"started": True})
                 elif p == "/api/applications/queue":
                     if not store.get(b.get("job_id", "")):
                         return self._json({"error": "unknown job"}, 404)
+                    app = store.queue_application(b["job_id"], b.get("engine", apply_engine.effective_settings()["engine"]))
                     apply_engine.start_worker(store.path)
-                    self._json(store.queue_application(b["job_id"], b.get("engine", "claude-chrome")))
+                    self._json(app)
                 elif p == "/api/applications/status":
                     if b.get("status") not in APP_STATUSES:
                         return self._json({"error": f"status must be one of {APP_STATUSES}"}, 400)
@@ -150,8 +166,11 @@ def make_handler(store: Store):
                     store.update_application(b["job_id"], **fields)
                     self._json(store.get_application(b["job_id"]))
                 elif p == "/api/applications/retry":
-                    apply_engine.start_worker(store.path)
+                    app = store.get_application(b["job_id"])
+                    if not app or app["status"] == "running":
+                        return self._json({"error": "Application missing or still running"}, 400)
                     store.update_application(b["job_id"], status="queued")
+                    apply_engine.start_worker(store.path)
                     self._json(store.get_application(b["job_id"]))
                 elif p == "/api/questions/answer":
                     qrow = store.answer_question(int(b["id"]), b.get("answer", ""))
@@ -170,6 +189,13 @@ def make_handler(store: Store):
                     self._json({"ok": True, "status": prof.status()})
                 elif p == "/api/settings":
                     self._json(prof.save_settings(b))
+                elif p == "/api/bridge/start":
+                    from jobFilter import bridge
+                    bridge.ensure_running()
+                    self._json(bridge.status())
+                elif p == "/api/screening-settings":
+                    from jobFilter import screen
+                    self._json(screen.save_screening_settings(config_path, b))
                 elif p == "/api/answers":
                     if not b.get("question"):
                         return self._json({"error": "question required"}, 400)
@@ -178,6 +204,8 @@ def make_handler(store: Store):
                     self._json({"deleted": prof.delete_answer(int(b["id"]))})
                 else:
                     self._json({"error": "not found"}, 404)
+            except ValueError as e:
+                self._json({"error": str(e)}, 400)
             except Exception as e:
                 self._json({"error": str(e)}, 500)
 

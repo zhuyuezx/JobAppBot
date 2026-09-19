@@ -1,0 +1,16 @@
+"""Application provider identifiers shared by settings, storage, CLI and workers."""
+
+CLAUDE = "claude-chrome"
+CODEX = "codex-playwright"
+APPLICATION_ENGINES = (CLAUDE, CODEX)
+LEGACY_CODEX = "codex-chrome"  # Read only during migration; never accepted for new work.
+
+
+def validate_engine(engine):
+    if engine not in APPLICATION_ENGINES:
+        raise ValueError(f"engine must be one of: {', '.join(APPLICATION_ENGINES)}")
+    return engine
+
+
+def migrate_engine(engine):
+    return CODEX if engine == LEGACY_CODEX else engine

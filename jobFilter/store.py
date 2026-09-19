@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from jobFilter.models import Job
+from jobFilter.providers import APPLICATION_ENGINES, CLAUDE, CODEX, LEGACY_CODEX, validate_engine
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS jobs (
@@ -140,6 +141,16 @@ class Store:
             self.conn.executescript("CREATE INDEX IF NOT EXISTS jobs_norm_url ON jobs(norm_url); CREATE INDEX IF NOT EXISTS jobs_norm_key ON jobs(norm_key);")
             self.conn.execute(f"PRAGMA user_version = {NORM_KEY_VERSION}")
             self.conn.commit()
+
+        # Retire manual Codex claims without starting work in a different browser.
+        # Results, artifacts, answers and completed statuses remain intact.
+        with self.conn:
+            self.conn.execute("""UPDATE applications SET engine=?, session_id=NULL,
+                summary=CASE WHEN status IN ('queued','running') THEN ? ELSE summary END,
+                status=CASE WHEN status IN ('queued','running') THEN 'failed' ELSE status END
+                WHERE engine=?""", (CODEX,
+                "Manual Codex was retired. Click Run again to continue with the automatic browser; sign in there if needed.",
+                LEGACY_CODEX))
 
     # ----- writes --------------------------------------------------------
     def upsert_many(self, jobs: list[Job], run_id: str) -> list[Job]:
@@ -281,7 +292,13 @@ class Store:
         self.conn.commit()
 
     # ----- applications --------------------------------------------------
-    def queue_application(self, job_id: str, engine: str = "claude-chrome") -> dict[str, Any]:
+    def queue_application(self, job_id: str, engine: str = CLAUDE) -> dict[str, Any]:
+        validate_engine(engine)
+        existing = self.get_application(job_id)
+        if existing and existing["engine"] != engine:
+            raise ValueError("An existing application keeps its original engine; use Retry to continue it.")
+        if existing and existing["status"] == "running":
+            raise ValueError("Application is already running")
         now = _iso()
         self.conn.execute(
             """INSERT INTO applications (job_id, status, engine, created_at, updated_at)
@@ -320,10 +337,11 @@ class Store:
         sql += " ORDER BY a.updated_at DESC"
         return [self._app_row(r) for r in self.conn.execute(sql, params).fetchall()]
 
-    def next_queued(self) -> Optional[dict[str, Any]]:
+    def next_queued(self, engine: Optional[str] = None) -> Optional[dict[str, Any]]:
+        engines = (validate_engine(engine),) if engine is not None else APPLICATION_ENGINES
         row = self.conn.execute(
             "SELECT a.*, j.job_json, j.hc_url FROM applications a JOIN jobs j ON j.id = a.job_id "
-            "WHERE a.status = 'queued' ORDER BY a.updated_at ASC LIMIT 1").fetchone()
+            f"WHERE a.status = 'queued' AND a.engine IN ({','.join('?' for _ in engines)}) ORDER BY a.updated_at ASC LIMIT 1", engines).fetchone()
         return self._app_row(row) if row else None
 
     def application_counts(self) -> dict[str, int]:

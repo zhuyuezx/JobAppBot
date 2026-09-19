@@ -129,12 +129,15 @@ config's `search_state`.
 
 ## Web UI
 
-`server.py` is a stdlib `ThreadingHTTPServer`; `static/index.html` is one
-vanilla-JS page.
+`server.py` is a stdlib `ThreadingHTTPServer`. The frontend separates markup
+(`static/index.html`), behavior (`static/app.js`) and styles (`static/styles.css`).
 
 | Endpoint | Returns |
 |---|---|
 | `GET /` | the page |
+| `GET /static/app.js`, `/static/styles.css` | frontend assets |
+| `GET/POST /api/screening-settings` | independent screening provider settings |
+| `POST /api/bridge/start` | start the managed GPT browser |
 | `GET /api/jobs?since=24` | jobs first seen in the last N hours |
 | `GET /api/jobs?date=YYYY-MM-DD` | jobs first seen that local day |
 | `GET /api/jobs` | everything |
@@ -151,7 +154,7 @@ vanilla-JS page.
 | `GET/POST /api/profile`, `/api/settings`, `/api/answers` | profile, engine settings, answer bank |
 | `GET /api/file?path=` | screenshot/log files under `data/apply` |
 
-The page supports `#jobs`, `#apps`, `#profile` deep links. The Jobs tab has a
+The page supports `#jobs`, `#apps`, `#profile`, `#settings` deep links. The Jobs tab has a
 source selector (All / hiring.cafe / Simplify / startup.jobs, remembered in
 localStorage) and groups rows by `first_seen` day; `list --source X` and the
 per-source Excel sheets are the CLI/file equivalents.
@@ -207,7 +210,14 @@ background thread ("Screen now" button); Excel has Sponsor?/Fit/Screening column
 
 ## Apply engine (`apply_engine.py`)
 
-One application = one headless Claude Code run on the user's subscription:
+`providers.py` defines the two supported engines. The worker dispatches Claude jobs
+here and Codex jobs to `bridge_engine.py`, which uses `codex.py` and the persistent
+MCP browser in `bridge.py`. `application_state.py` owns the shared result schema and
+artifact directory, plus atomic Codex claim/completion checks. The old manual Codex
+queue is migrated in `Store._migrate`; pending manual runs require an explicit retry.
+See [Codex setup and flow](../docs/CODEX_INTEGRATION.md).
+
+For Claude, one application = one headless Claude Code run on the user's subscription:
 
 ```
 claude -p "<task prompt>" --chrome --output-format stream-json --verbose \
@@ -276,14 +286,21 @@ jobFilter/filters.py       rule functions
 jobFilter/store.py         SQLite store, dedup, date queries
 jobFilter/excel.py         openpyxl writer
 jobFilter/server.py        JSON API + static page
-jobFilter/static/index.html
+jobFilter/static/index.html  page markup
+jobFilter/static/app.js     frontend behavior
+jobFilter/static/styles.css frontend styling
 jobFilter/scheduler.py     foreground interval loop
 jobFilter/profile.py       setup/profile.json, setup/answers.json, resume text
 .claude/skills/apply-job/  the form-filling skill Claude follows and extends
 setup/                     user setup (gitignored) + tracked templates
 jobFilter/descriptions.py  description fetchers per ATS + years-of-experience inference
 jobFilter/screen.py        post-fetch LLM screening (sponsorship + fit), company cache
-jobFilter/apply_engine.py  Claude Code + Chrome runner, worker thread
+jobFilter/providers.py     application engine definitions and validation
+jobFilter/application_state.py result schema, artifacts, atomic Codex claims
+jobFilter/apply_engine.py  provider dispatch, Claude runner, worker thread
+jobFilter/bridge_engine.py Codex application workflow
+jobFilter/bridge.py        managed Playwright MCP browser
+jobFilter/codex.py         subscription-backed Codex CLI runner
 jobFilter/cli.py           argparse entry point
 bin/jobfilter              service control script
 docs/                      SEARCH_OPTIONS.md, design notes, screenshots

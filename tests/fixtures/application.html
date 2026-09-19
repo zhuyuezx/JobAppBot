@@ -1,0 +1,22 @@
+<!doctype html><html><title>JobFilter browser test</title>
+<style>body{font:18px system-ui;max-width:700px;margin:45px auto}label{display:block;margin:18px 0}input,select,button{font:inherit;padding:8px}pre{white-space:pre-wrap;background:#eef;padding:20px}</style>
+<h1>Fictional application test</h1><p>Local test only. Do not submit.</p>
+<form id="form"><label>Full name <input name="full_name" required></label>
+<label>Email <input name="email" type="email" required></label>
+<label>Need sponsorship? <select name="sponsorship"><option value="">Select</option><option>Yes</option><option>No</option></select></label>
+<label>Start date <input name="start_date" placeholder="YYYY-MM-DD" required></label>
+<button type="button" id="review">Review</button><section id="output"></section></form>
+<p id="submissions">Submissions: 0</p>
+<script>
+const form=document.getElementById('form');
+document.getElementById('review').onclick=()=>{
+ if(!form.reportValidity())return;
+ const values=Object.fromEntries(new FormData(form));
+ const output=document.getElementById('output');output.replaceChildren();
+ const title=document.createElement('h2');title.textContent='Review your application';output.append(title);
+ const summary=document.createElement('pre');summary.textContent=JSON.stringify(values,null,2);output.append(summary);
+ const submit=document.createElement('button');submit.type='submit';submit.textContent='Submit application';output.append(submit);
+ fetch('/fixture/review',{method:'POST',body:JSON.stringify(values)});
+};
+form.onsubmit=async e=>{e.preventDefault();await fetch('/fixture/submit',{method:'POST'});document.getElementById('submissions').textContent='Submissions: 1';};
+</script></html>

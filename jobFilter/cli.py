@@ -8,6 +8,8 @@
     python -m jobFilter schedule [--interval 3600]             foreground loop: run every N seconds
 """
 from __future__ import annotations
+from jobFilter.providers import APPLICATION_ENGINES
+
 
 import argparse
 import json
@@ -119,7 +121,7 @@ def cmd_run(args) -> int:
         if scfg.get("enabled") and not args.no_screen:
             todo = store.unscreened(limit=int(scfg.get("max_per_run", 40)))
             if todo:
-                log(f"screening {len(todo)} unscreened job(s) with {scfg['model']} (cap {scfg.get('max_per_run')}/run)")
+                log(f"screening {len(todo)} unscreened job(s) with {screen.model_label(scfg)} (cap {scfg.get('max_per_run')}/run)")
                 counts = screen.screen_batch(store, todo, scfg, log=log)
                 log(f"screened: {counts}")
         # Daily collection: regenerate today's workbook from everything first seen today.
@@ -200,8 +202,10 @@ def cmd_screen(args) -> int:
     from jobFilter.store import Store
     cfg = load_config(args.config)
     scfg = screen.screening_config(cfg)
+    if args.provider:
+        scfg["provider"] = args.provider
     if args.model:
-        scfg["model"] = args.model
+        scfg["codex_model" if scfg["provider"] == "codex" else "model"] = args.model
     store = Store(DB_PATH)
     if args.job:
         rows = [r for r in store.query() if r["id"].startswith(args.job)]
@@ -211,10 +215,10 @@ def cmd_screen(args) -> int:
         rows = store.unscreened(limit=args.limit, since_hours=args.since)
     if not rows:
         log("nothing to screen"); return 0
-    log(f"screening {len(rows)} job(s) with {scfg['model']}")
+    log(f"screening {len(rows)} job(s) with {screen.model_label(scfg)}")
     counts = screen.screen_batch(store, rows, scfg, log=log)
     log(f"done: {counts}")
-    return 0
+    return 1 if counts["failed"] or counts["skipped"] else 0
 
 
 def cmd_profile(args) -> int:
@@ -231,13 +235,15 @@ def cmd_profile(args) -> int:
 def cmd_apply(args) -> int:
     from jobFilter import apply_engine
     from jobFilter.store import Store
-    store = Store(DB_PATH)
+    store = Store(args.db or DB_PATH)
     if args.action == "queue":
+        if not args.job_id:
+            log("queue requires a job_id prefix"); return 1
         matches = [r for r in store.query() if r["id"].startswith(args.job_id)]
         if len(matches) != 1:
             log(f"{len(matches)} jobs match '{args.job_id}'; give a longer id prefix")
             return 1
-        a = store.queue_application(matches[0]["id"])
+        a = store.queue_application(matches[0]["id"], args.engine or apply_engine.effective_settings()["engine"])
         log(f"queued: {a['job']['title']} @ {a['job']['company']}")
         return 0
     if args.action == "list":
@@ -251,6 +257,8 @@ def cmd_apply(args) -> int:
             log(f"running {app['job']['title']} @ {app['job']['company']}")
             res = apply_engine.run_application(store, app)
             log(f"  -> {res['status']}: {res['summary'][:200]}")
+            if res["status"] == "queued":
+                log("Another bridge application is active; try again after it finishes."); return 1
             app = None if args.once else store.next_queued()
         log("no queued applications")
         return 0
@@ -281,6 +289,7 @@ def build_parser() -> argparse.ArgumentParser:
     sc2.add_argument("--since", type=float, metavar="HOURS", help="only jobs first seen within the last N hours")
     sc2.add_argument("--job", help="job id prefix: (re)screen this one job")
     sc2.add_argument("--model", help="override the model, e.g. sonnet, opus, haiku")
+    sc2.add_argument("--provider", choices=["claude", "codex"], help="screen with Claude or a ChatGPT subscription")
     sc2.set_defaults(func=cmd_screen)
 
     v = sub.add_parser("validate", help="check config search_state keys/values against hiring.cafe's schema")
@@ -306,10 +315,12 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--force", action="store_true", help="overwrite an existing profile.json with the template")
     pr.set_defaults(func=cmd_profile)
 
-    ap = sub.add_parser("apply", help="queue / list / run applications (Claude in Chrome)")
+    ap = sub.add_parser("apply", help="queue and run applications with Claude or Codex")
     ap.add_argument("action", choices=["queue", "list", "worker"])
     ap.add_argument("job_id", nargs="?", help="job id prefix (for queue)")
     ap.add_argument("--once", action="store_true", help="worker: process one application then exit")
+    ap.add_argument("--engine", choices=APPLICATION_ENGINES, help="queue provider (existing applications retain theirs)")
+    ap.add_argument("--db", type=Path, help="alternate database, e.g. for isolated tests")
     ap.set_defaults(func=cmd_apply)
 
     sc = sub.add_parser("schedule", help="foreground loop that runs `run` every --interval seconds")

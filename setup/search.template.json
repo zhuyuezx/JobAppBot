@@ -107,8 +107,13 @@
     }
   },
   "screening": {
-    "_readme": "Post-fetch screening of every new job by a small Claude model (headless Claude Code on your subscription): reads the description, web-searches the employer's H-1B history (cached per company), judges new-grad fit.",
+    "_readme": "Post-fetch screening of every new job with Claude Code or Codex on your subscription: reads the description, web-searches the employer's H-1B history (cached per company), judges new-grad fit.",
     "enabled": true,
+    "provider": "claude",
+    "_provider": "claude (default) or codex. Codex uses your ChatGPT login; run codex login first.",
+    "codex_model": "",
+    "_codex_model": "Empty uses the Codex CLI default model. Separate from the Claude model below.",
+    "codex_timeout": 300,
     "_model": "Claude Code model alias: sonnet (default), haiku, opus.",
     "model": "sonnet",
     "_max_per_run": "Cap per hourly scan; anything left is picked up next hour.",

@@ -14,7 +14,6 @@ from __future__ import annotations
 import glob
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -25,9 +24,10 @@ from typing import Any, Optional
 
 from jobFilter import profile as prof
 from jobFilter.store import Store
+from jobFilter.application_state import RESULT_SCHEMA, work_directory
+from jobFilter.providers import CLAUDE, CODEX, validate_engine
 
 ROOT = Path(__file__).resolve().parent.parent
-APPLY_DIR = ROOT / "data" / "apply"
 SKILL_PATH = ROOT / ".claude" / "skills" / "apply-job" / "SKILL.md"
 LESSONS_HEADER = "## Learned from runs"
 
@@ -62,28 +62,6 @@ def append_lessons(lessons: list[str], company: str) -> int:
 # Model / turn cap come from data/profile/settings.json (UI: Applications tab);
 # JOBFILTER_MODEL / JOBFILTER_MAX_TURNS env vars override them.
 
-RESULT_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "status": {"type": "string", "enum": ["review_ready", "needs_answer", "needs_login", "captcha", "already_applied", "failed"]},
-        "summary": {"type": "string", "description": "2-4 sentences: what was filled, what is left, any account created (email + password)."},
-        "page_url": {"type": "string", "description": "URL of the tab where the application currently is."},
-        "unanswered_questions": {
-            "type": "array",
-            "items": {"type": "object", "properties": {
-                "question": {"type": "string"},
-                "options": {"type": "array", "items": {"type": "string"}},
-                "why": {"type": "string"}}, "required": ["question"]},
-        },
-        "filled_fields": {"type": "array", "items": {"type": "string"}},
-        "screenshot_path": {"type": "string"},
-        "lessons": {"type": "array", "items": {"type": "string"},
-                    "description": "New, reusable facts about this site's form that are NOT already in the skill notes (selectors, quirks, required questions). Empty if nothing new."},
-    },
-    "required": ["status", "summary", "page_url", "unanswered_questions"],
-}
-
-
 # ----- environment ---------------------------------------------------------
 def find_claude() -> Optional[str]:
     env = os.environ.get("JOBFILTER_CLAUDE")
@@ -107,7 +85,11 @@ def chrome_host_installed() -> bool:
 
 
 def engine_status() -> dict[str, Any]:
+    from jobFilter import bridge
+    from jobFilter.codex import find_codex
     return {
+        "bridge": bridge.status(),
+        "codex": find_codex(),
         "claude": find_claude(),
         "chrome_host_installed": chrome_host_installed(),
         "settings": effective_settings(),
@@ -128,11 +110,6 @@ def effective_settings() -> dict[str, Any]:
 
 
 # ----- prompt --------------------------------------------------------------
-def _safe_dir(job_id: str) -> Path:
-    d = APPLY_DIR / re.sub(r"[^A-Za-z0-9_.-]+", "_", job_id)[:120]
-    d.mkdir(parents=True, exist_ok=True)
-    return d
-
 
 def build_prompt(app: dict[str, Any], work_dir: Path) -> str:
     job = app["job"]
@@ -205,9 +182,13 @@ def _log_event(evt: dict[str, Any], log) -> None:
 
 def run_application(store: Store, app: dict[str, Any]) -> dict[str, Any]:
     """Run (or resume) one application. Updates the store and returns the result dict."""
+    if app.get("engine") == CODEX:
+        from jobFilter.bridge_engine import run_application as run_bridge
+        return run_bridge(store, app)
+    validate_engine(app.get("engine", CLAUDE))
     job_id = app["job_id"]
     claude = find_claude()
-    work_dir = _safe_dir(job_id)
+    work_dir = work_directory(job_id)
     log_path = work_dir / "log.txt"
     store.update_application(job_id, status="running", log_path=str(log_path))
     store.bump_attempts(job_id)
@@ -314,18 +295,23 @@ class ApplyWorker(threading.Thread):
 
     def run(self) -> None:
         store = Store(self.db_path)
-        while not self.stop_flag.is_set():
-            app = store.next_queued()
-            if not app:
-                self.stop_flag.wait(self.poll)
-                continue
-            self.current_job = app["job_id"]
-            try:
-                run_application(store, app)
-            except Exception as e:  # never kill the worker
-                store.update_application(app["job_id"], status="failed", summary=f"engine error: {e}")
-            finally:
-                self.current_job = None
+        try:
+            while not self.stop_flag.is_set():
+                app = store.next_queued()
+                if not app:
+                    self.stop_flag.wait(self.poll)
+                    continue
+                self.current_job = app["job_id"]
+                try:
+                    result = run_application(store, app)
+                    if result["status"] == "queued":
+                        self.stop_flag.wait(self.poll)
+                except Exception as e:  # never kill the worker
+                    store.update_application(app["job_id"], status="failed", summary=f"engine error: {e}")
+                finally:
+                    self.current_job = None
+        finally:
+            store.close()
 
 
 _worker: Optional[ApplyWorker] = None
