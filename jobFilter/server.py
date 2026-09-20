@@ -154,7 +154,9 @@ def make_handler(store: Store, config_path: Path | None = None):
                 elif p == "/api/applications/queue":
                     if not store.get(b.get("job_id", "")):
                         return self._json({"error": "unknown job"}, 404)
-                    app = store.queue_application(b["job_id"], b.get("engine", apply_engine.effective_settings()["engine"]))
+                    defaults = apply_engine.effective_settings()
+                    app = store.queue_application(b["job_id"], b.get("engine", defaults["engine"]),
+                                                  {**defaults, **b.get("settings", {})})
                     apply_engine.start_worker(store.path)
                     self._json(app)
                 elif p == "/api/applications/status":

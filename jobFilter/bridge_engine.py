@@ -27,7 +27,7 @@ def run_application(store, app):
         try:
             log("Starting Codex browser application. Preparing browser bridge…")
             url = bridge.ensure_running()
-            settings = profile.load_settings()
+            settings = app.get("settings") or profile.load_settings()
             context = {k: task[k] for k in ("job", "profile", "answer_bank", "resume_path", "resume_text", "previous_result", "page_url", "questions")}
             prompt = f"""Prepare this job application using only the jobfilter_browser MCP tools.
 List tabs first. If the application is already open (especially when resuming), select it and

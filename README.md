@@ -18,7 +18,7 @@ flowchart LR
 
 1. **Find**: three sources are searched with your filters; each job is stored once.
 2. **Screen**: a small Claude model reads the posting and looks up the company's H-1B history. Each job gets a badge: `sponsor: likely`, `unknown`, or `unlikely`, plus a fit score. Tick *hide unlikely sponsors* to see only what's worth your time.
-3. **Apply**: click *Prepare with Claude* or *Prepare with GPT*. It fills the form in your Chrome, asks you when it can't answer something, and stops on the review page.
+3. **Apply**: choose provider, model and thinking level on the job, then click *Prepare application*. It fills the form in your Chrome, asks you when it can't answer something, and stops on the review page.
 
 By default, everything runs on your Claude subscription. No API key.
 
@@ -78,3 +78,5 @@ Tuning (search filters, which sources, screening model, jobs per scan) is all in
 ---
 
 Technical details: [jobFilter/README.md](jobFilter/README.md). Search parameter reference: [docs/SEARCH_OPTIONS.md](docs/SEARCH_OPTIONS.md).
+
+Applications can be ranked by submission time (newest first by default), oldest submission, recent activity, attention needed, or company. Submission time is recorded when you mark an application submitted; older records use their last update as an explicitly labeled estimate. Applications without a recorded submission follow submitted entries.

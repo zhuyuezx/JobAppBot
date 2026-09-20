@@ -26,7 +26,7 @@ RESUME_TEXT_PATH = PROFILE_DIR / "resume.txt"
 RESUME_DIR = SETUP_DIR / "resume"
 SETTINGS_PATH = PROFILE_DIR / "settings.json"
 DEFAULT_SETTINGS: dict[str, Any] = {"engine": CLAUDE, "model": "opus", "max_turns": 120,
-                                  "codex_model": "", "codex_reasoning_effort": "", "codex_timeout": 900}
+                                  "codex_model": "gpt-5.6-luna", "codex_reasoning_effort": "", "codex_timeout": 900}
 MODEL_CHOICES = ["opus", "sonnet", "haiku"]
 TEMPLATE_PATH = SETUP_DIR / "profile.template.json"
 
@@ -189,7 +189,7 @@ def load_settings() -> dict[str, Any]:
     return data
 
 
-def save_settings(updates: dict[str, Any]) -> dict[str, Any]:
+def application_settings(updates: dict[str, Any]) -> dict[str, Any]:
     data = load_settings()
     if "engine" in updates:
         data["engine"] = validate_engine(updates["engine"])
@@ -203,6 +203,11 @@ def save_settings(updates: dict[str, Any]) -> dict[str, Any]:
         data["codex_reasoning_effort"] = validate_thinking_level(updates["codex_reasoning_effort"])
     if "codex_timeout" in updates:
         data["codex_timeout"] = max(30, min(3600, int(updates["codex_timeout"])))
+    return data
+
+
+def save_settings(updates: dict[str, Any]) -> dict[str, Any]:
+    data = application_settings(updates)
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)
     SETTINGS_PATH.write_text(json.dumps(data, indent=2) + "\n")
     return data

@@ -242,7 +242,8 @@ def cmd_apply(args) -> int:
         if len(matches) != 1:
             log(f"{len(matches)} jobs match '{args.job_id}'; give a longer id prefix")
             return 1
-        a = store.queue_application(matches[0]["id"], args.engine or apply_engine.effective_settings()["engine"])
+        settings = apply_engine.effective_settings()
+        a = store.queue_application(matches[0]["id"], args.engine or settings["engine"], settings)
         log(f"queued: {a['job']['title']} @ {a['job']['company']}")
         return 0
     if args.action == "list":

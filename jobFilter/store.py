@@ -48,7 +48,10 @@ CREATE TABLE IF NOT EXISTS applications (
     screenshot    TEXT,
     log_path      TEXT,
     note          TEXT,
-    result_json   TEXT
+    result_json   TEXT,
+    settings_json TEXT,
+    submitted_at TEXT,
+    submitted_at_estimated INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS applications_status ON applications(status);
 CREATE TABLE IF NOT EXISTS questions (
@@ -141,6 +144,18 @@ class Store:
             self.conn.executescript("CREATE INDEX IF NOT EXISTS jobs_norm_url ON jobs(norm_url); CREATE INDEX IF NOT EXISTS jobs_norm_key ON jobs(norm_key);")
             self.conn.execute(f"PRAGMA user_version = {NORM_KEY_VERSION}")
             self.conn.commit()
+
+        if "settings_json" not in {r[1] for r in self.conn.execute("PRAGMA table_info(applications)")}:
+            self.conn.execute("ALTER TABLE applications ADD COLUMN settings_json TEXT")
+            self.conn.commit()
+
+        app_columns = {r[1] for r in self.conn.execute("PRAGMA table_info(applications)")}
+        if "submitted_at" not in app_columns:
+            with self.conn:
+                self.conn.execute("ALTER TABLE applications ADD COLUMN submitted_at TEXT")
+                self.conn.execute("ALTER TABLE applications ADD COLUMN submitted_at_estimated INTEGER NOT NULL DEFAULT 0")
+                # Older releases tracked only the last update, not the actual submission.
+                self.conn.execute("UPDATE applications SET submitted_at=updated_at, submitted_at_estimated=1 WHERE status='submitted'")
 
         # Retire manual Codex claims without starting work in a different browser.
         # Results, artifacts, answers and completed statuses remain intact.
@@ -292,19 +307,25 @@ class Store:
         self.conn.commit()
 
     # ----- applications --------------------------------------------------
-    def queue_application(self, job_id: str, engine: str = CLAUDE) -> dict[str, Any]:
+    def queue_application(self, job_id: str, engine: str = CLAUDE, settings: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         validate_engine(engine)
         existing = self.get_application(job_id)
         if existing and existing["engine"] != engine:
             raise ValueError("An existing application keeps its original engine; use Retry to continue it.")
         if existing and existing["status"] == "running":
             raise ValueError("Application is already running")
+        from jobFilter.profile import application_settings
+        if existing and settings is not None:
+            raise ValueError("Existing applications keep their launch settings; use Retry to continue.")
+        chosen = existing.get("settings") if existing else application_settings({**(settings or {}), "engine": engine})
+        if not existing and engine == CODEX and not chosen["codex_model"]:
+            raise ValueError("Choose a GPT model before starting the application")
         now = _iso()
         self.conn.execute(
-            """INSERT INTO applications (job_id, status, engine, created_at, updated_at)
-               VALUES (?, 'queued', ?, ?, ?)
+            """INSERT INTO applications (job_id, status, engine, created_at, updated_at, settings_json)
+               VALUES (?, 'queued', ?, ?, ?, ?)
                ON CONFLICT(job_id) DO UPDATE SET status='queued', engine=excluded.engine, updated_at=excluded.updated_at""",
-            (job_id, engine, now, now))
+            (job_id, engine, now, now, json.dumps(chosen) if chosen else None))
         self.conn.commit()
         return self.get_application(job_id)
 
@@ -314,6 +335,11 @@ class Store:
         if "result" in fields:
             fields["result_json"] = json.dumps(fields.pop("result"))
         fields["updated_at"] = _iso()
+        if fields.get("status") == "submitted":
+            current = self.get_application(job_id)
+            if current and current["status"] != "submitted":
+                fields["submitted_at"] = fields["updated_at"]
+                fields["submitted_at_estimated"] = 0
         cols = ", ".join(f"{k} = ?" for k in fields)
         self.conn.execute(f"UPDATE applications SET {cols} WHERE job_id = ?", (*fields.values(), job_id))
         self.conn.commit()
@@ -334,7 +360,7 @@ class Store:
         if status:
             sql += " WHERE a.status = ?"
             params.append(status)
-        sql += " ORDER BY a.updated_at DESC"
+        sql += " ORDER BY a.submitted_at IS NULL, a.submitted_at DESC, a.updated_at DESC, a.job_id"
         return [self._app_row(r) for r in self.conn.execute(sql, params).fetchall()]
 
     def next_queued(self, engine: Optional[str] = None) -> Optional[dict[str, Any]]:
@@ -383,6 +409,7 @@ class Store:
     @staticmethod
     def _app_row(row: sqlite3.Row) -> dict[str, Any]:
         d = dict(row)
+        d["settings"] = json.loads(d.pop("settings_json", None) or "null")
         d["job"] = json.loads(d.pop("job_json"))
         d["result"] = json.loads(d["result_json"]) if d.get("result_json") else None
         d.pop("result_json", None)

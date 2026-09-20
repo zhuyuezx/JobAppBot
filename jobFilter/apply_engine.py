@@ -85,10 +85,11 @@ def chrome_host_installed() -> bool:
 
 def engine_status() -> dict[str, Any]:
     from jobFilter import bridge
-    from jobFilter.codex import find_codex
+    from jobFilter.codex import find_codex, model_choices
     return {
         "bridge": bridge.status(),
         "codex": find_codex(),
+        "codex_models": model_choices(),
         "claude": find_claude(),
         "chrome_host_installed": chrome_host_installed(),
         "settings": effective_settings(),
@@ -203,7 +204,7 @@ def run_application(store: Store, app: dict[str, Any]) -> dict[str, Any]:
     resuming = bool(app.get("session_id")) and (bool(answered) or last_status in ("needs_login", "captcha"))
     prompt = resume_message(answered, work_dir, after=last_status) if resuming else build_prompt(app, work_dir)
 
-    settings = effective_settings()
+    settings = app.get("settings") or effective_settings()
     cmd = [claude, "-p", prompt, "--chrome", "--output-format", "stream-json", "--verbose",
            "--json-schema", json.dumps(RESULT_SCHEMA), "--max-turns", str(settings["max_turns"]),
            "--model", settings["model"],

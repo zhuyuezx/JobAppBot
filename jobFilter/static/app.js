@@ -81,6 +81,34 @@ function renderSrcTabs() {
     present.map(v => `<button data-src="${esc(v)}" class="${srcFilter === v ? 'on' : ''}">${esc(VIA_LABEL[v] || v)} <span class="badge">${counts[v]}</span></button>`).join('');
   if (srcFilter !== 'all' && !counts[srcFilter]) srcFilter = 'all';
 }
+// Keep per-job choices while filtering or refreshing the list; save them with the application.
+const launchDrafts = new Map();
+let launchDefaults = {}, launchModels = [];
+function launchChoice(id) {
+  return launchDrafts.get(id) || {engine: applicationEngine,
+    model: applicationEngine === 'codex-playwright' ? (launchDefaults.codex_model || 'gpt-5.6-luna') : (launchDefaults.model || 'opus'),
+    effort: launchDefaults.codex_reasoning_effort || ''};
+}
+function launchControls(id) {
+  const choice = launchChoice(id), gpt = choice.engine === 'codex-playwright';
+  const models = gpt ? launchModels : ['opus', 'sonnet', 'haiku'];
+  return `<div class="launch-options settings-fields" data-launch-id="${esc(id)}">
+    <label>Application provider<select data-run-engine><option value="claude-chrome" ${!gpt ? 'selected' : ''}>Claude Code</option><option value="codex-playwright" ${gpt ? 'selected' : ''}>ChatGPT / Codex</option></select></label>
+    <label>Application model<select data-run-model><option value="">Choose a model</option>${models.map(m => `<option value="${esc(m)}" ${choice.model === m ? 'selected' : ''}>${esc(m)}</option>`).join('')}</select></label>
+    ${gpt ? `<label>Thinking level<select data-run-effort>${[['','Model default'],['low','Low'],['medium','Medium'],['high','High'],['xhigh','Extra high']].map(([v,label]) => `<option value="${v}" ${choice.effort === v ? 'selected' : ''}>${label}</option>`).join('')}</select></label>` : ''}
+    <span class="muted">These choices apply only to this application.</span>
+  </div>`;
+}
+$('#list').addEventListener('change', e => {
+  const box = e.target.closest('[data-launch-id]'); if (!box) return;
+  const id = box.dataset.launchId, choice = {...launchChoice(id)};
+  if (e.target.matches('[data-run-engine]')) {
+    choice.engine = e.target.value;
+    choice.model = choice.engine === 'codex-playwright' ? (launchDefaults.codex_model || 'gpt-5.6-luna') : (launchDefaults.model || 'opus');
+  } else { choice.model = box.querySelector('[data-run-model]').value; choice.effort = box.querySelector('[data-run-effort]')?.value || ''; }
+  launchDrafts.set(id, choice);
+  if (e.target.matches('[data-run-engine]')) box.outerHTML = launchControls(id);
+});
 function rowHtml(r) {
   const j = r.job, link = j.apply_url || r.hc_url;
   return `<div class="job" data-id="${esc(r.id)}">
@@ -94,8 +122,9 @@ function rowHtml(r) {
       <div class="details">
         ${screenBlock(r)}
         ${jobDetails(j, r)}
+        ${!r.app_status ? launchControls(r.id) : ''}
         <div class="actions">
-          ${r.app_status ? `<button class="btn" data-act="goapps">Open in Applications</button>` : `<button class="btn primary" data-act="prepare">${applicationEngine === 'codex-playwright' ? 'Prepare with GPT' : 'Prepare with Claude'}</button>`}
+          ${r.app_status ? `<button class="btn" data-act="goapps">Open in Applications</button>` : `<button class="btn primary" data-act="prepare">Prepare application</button>`}
           ${j.apply_url ? `<a class="btn" href="${esc(j.apply_url)}" target="_blank" rel="noopener">Apply page</a>` : ''}
           <a class="btn" href="${esc(r.hc_url)}" target="_blank" rel="noopener">${esc(VIA_LABEL[j.via] || 'hiring.cafe')}</a>
         </div>
@@ -167,8 +196,13 @@ $('#list').addEventListener('click', async e => {
       poll(0); return;
     }
     if (act.dataset.act === 'prepare') {
+      const box = job.querySelector('[data-launch-id]');
+      const engine = box.querySelector('[data-run-engine]').value;
+      const model = box.querySelector('[data-run-model]').value;
+      if (!model) { alert('Choose an application model first.'); return; }
+      const settings = engine === 'codex-playwright' ? {codex_model: model, codex_reasoning_effort: box.querySelector('[data-run-effort]').value} : {model};
       act.disabled = true; act.textContent = 'Queued...';
-      const r = await api('/api/applications/queue', { job_id: job.dataset.id });
+      const r = await api('/api/applications/queue', { job_id: job.dataset.id, engine, settings });
       if (r.error) alert(r.error);
       await load(); $('#tabs button[data-tab=apps]').click();
     } else if (act.dataset.act === 'goapps') { $('#tabs button[data-tab=apps]').click(); }
@@ -195,6 +229,7 @@ async function refreshProviders() {
     const [st, sc] = await Promise.all([api('/api/engine'), api('/api/screening-settings')]);
     if (st.error) throw new Error(st.error);
     applicationEngine = st.settings.engine;
+    launchDefaults = st.settings; launchModels = st.codex_models || [];
     updateAttention(ATTENTION_STATUSES.reduce((n, status) => n + (st.counts[status] || 0), 0));
     if (sc.settings) { screeningProvider = sc.settings.provider; screeningEnabled = sc.settings.enabled; }
     const screening = sc.settings ? (sc.settings.enabled ? providerName(sc.settings.provider) : 'Paused') : 'Unavailable';
@@ -214,7 +249,7 @@ function thinkingSelect(id, selected = '') {
 function settingMessage(id, text, error = false) { const el = $(id); el.textContent = text; el.classList.toggle('error', error); }
 function renderApplicationSettings(st) {
   const saved = st.settings, selected = saved.engine === 'codex-playwright' ? 'codex' : 'claude';
-  $('#applicationSettings').innerHTML = `<h2>Application filling</h2><p class="help">Saved provider: <strong id="savedAppProvider">${providerName(saved.engine)}</strong>. Applies to new applications; existing applications keep their provider.</p>
+  $('#applicationSettings').innerHTML = `<h2>Application defaults</h2><p class="help">Saved provider: <strong id="savedAppProvider">${providerName(saved.engine)}</strong>. Override provider, model and thinking level beside any job before preparing it. Existing applications keep their saved choices.</p>
     ${providerCards('applicationProvider', selected, true)}
     <div id="applicationGuide"></div>
     <div id="claudeSettings" class="settings-fields"><label>Claude model<input id="modelInp" type="text" value="${esc(saved.model)}" list="claudeModels"><datalist id="claudeModels">${st.model_choices.map(m => `<option value="${esc(m)}">`).join('')}</datalist></label><label>Maximum turns<input id="turnsInp" type="text" inputmode="numeric" value="${saved.max_turns}"></label></div>
@@ -291,6 +326,8 @@ function appDetails(a) {
     <dl class="kv">
       <dt>Status</dt><dd>${badge(a.status)} <span class="muted">attempt ${a.attempts}, updated ${fmt(a.updated_at)}</span></dd>
       <dt>Provider</dt><dd>${providerName(a.engine)}</dd>
+      <dt>Submitted</dt><dd>${a.submitted_at ? fmt(a.submitted_at) + (a.submitted_at_estimated ? ' (estimated from legacy last update)' : '') : 'Not recorded'}</dd>
+      ${a.settings ? `<dt>Model</dt><dd>${esc(a.engine === 'codex-playwright' ? a.settings.codex_model : a.settings.model)}${a.engine === 'codex-playwright' ? ' · thinking: ' + esc(a.settings.codex_reasoning_effort || 'model default') : ''}</dd>` : ''}
       <dt>Summary</dt><dd>${esc(a.summary || '')}</dd>
       ${a.page_url ? `<dt>Tab</dt><dd><a href="${esc(a.page_url)}" target="_blank" rel="noopener">${esc(a.page_url)}</a></dd>` : ''}
       <dt>Note</dt><dd><input type="text" data-note value="${esc(a.note || '')}" placeholder="your note, saved with status changes" style="width:100%"></dd>
@@ -313,19 +350,30 @@ function appDetails(a) {
     <pre class="log" data-log>${esc((a.log || []).join('\n')) || '(no log yet)'}</pre>
   </div>`;
 }
+$('#appSort').addEventListener('change', renderApps);
 function renderApps() {
   const counts = {}; apps.forEach(a => counts[a.status] = (counts[a.status] || 0) + 1);
   $('#count').textContent = Object.entries(counts).map(([k, v]) => `${v} ${STATUS_LABEL[k] || k}`).join(' · ');
   updateAttention(apps.filter(a => ATTENTION_STATUSES.includes(a.status)).length);
   if (!apps.length) { $('#apps').innerHTML = '<div class="empty">No applications yet. Open a job in Jobs and choose Prepare with Claude or Prepare with GPT.</div>'; return; }
   const order = ['needs_answer', 'review_ready', 'needs_login', 'captcha', 'running', 'queued', 'failed', 'already_applied', 'submitted', 'skipped'];
-  apps.sort((x, y) => order.indexOf(x.status) - order.indexOf(y.status) || (y.updated_at > x.updated_at ? 1 : -1));
-  $('#apps').innerHTML = apps.map(a => `<div class="app ${openApp === a.job_id ? 'open' : ''}" data-id="${esc(a.job_id)}">
+  const sort = $('#appSort').value;
+  const recent = (x, y) => (y.updated_at || '').localeCompare(x.updated_at || '') || x.job_id.localeCompare(y.job_id);
+  apps.sort((x, y) => {
+    if (sort.startsWith('submitted-')) {
+      if (!!x.submitted_at !== !!y.submitted_at) return x.submitted_at ? -1 : 1;
+      return (sort === 'submitted-asc' ? 1 : -1) * (x.submitted_at || '').localeCompare(y.submitted_at || '') || recent(x, y);
+    }
+    if (sort === 'attention') return order.indexOf(x.status) - order.indexOf(y.status) || recent(x, y);
+    if (sort === 'company') return (x.job.company || '').localeCompare(y.job.company || '') || recent(x, y);
+    return recent(x, y);
+  });
+  $('#apps').innerHTML = apps.map((a, rank) => `<div class="app ${openApp === a.job_id ? 'open' : ''}" data-id="${esc(a.job_id)}">
       <div class="row">
-        <div class="title"><span class="chev" aria-hidden="true">&#9654;</span><a href="${esc(a.job.apply_url || a.hc_url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(a.job.title)}</a>${badge(a.status)}<span class="badge">${providerName(a.engine)}</span>${a.open_questions ? `<span class="badge warn">${a.open_questions} question${a.open_questions > 1 ? 's' : ''}</span>` : ''}</div>
+        <div class="title"><span class="badge">#${rank + 1}</span><span class="chev" aria-hidden="true">&#9654;</span><a href="${esc(a.job.apply_url || a.hc_url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(a.job.title)}</a>${badge(a.status)}<span class="badge">${providerName(a.engine)}</span>${a.open_questions ? `<span class="badge warn">${a.open_questions} question${a.open_questions > 1 ? 's' : ''}</span>` : ''}</div>
         <div class="muted">${esc(a.job.company)}</div>
         <div class="muted">${esc(a.summary || '').slice(0, 80)}</div>
-        <div class="muted">${fmt(a.updated_at)}</div>
+        <div class="muted">${a.submitted_at ? 'Submitted ' + fmt(a.submitted_at) + (a.submitted_at_estimated ? ' (est.)' : '') : 'Not submitted · updated ' + fmt(a.updated_at)}</div>
       </div>
       ${openApp === a.job_id ? appDetails(a) : '<div class="details"></div>'}
     </div>`).join('');

@@ -82,6 +82,16 @@ def find_codex():
     return next((p for p in candidates if p and os.access(p, os.X_OK)), None)
 
 
+def model_choices():
+    """Use the installed CLI's cached catalog, not a hard-coded model list."""
+    try:
+        cache = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")) / "models_cache.json"
+        models = json.loads(cache.read_text()).get("models", [])
+        return [m["slug"] for m in models if m.get("visibility") == "list" and m.get("slug")]
+    except (OSError, ValueError, TypeError):
+        return []
+
+
 def strict_schema(schema):
     result = copy.deepcopy(schema)
     def visit(node):

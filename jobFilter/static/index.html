@@ -34,6 +34,13 @@
 <main>
   <section id="tab-jobs"><div id="providerSummary" class="provider-summary"></div><div id="list"></div></section>
   <section id="tab-apps" hidden>
+    <div class="settings-fields"><label>Rank applications by<select id="appSort">
+      <option value="submitted-desc">Submission time · newest first</option>
+      <option value="submitted-asc">Submission time · oldest first</option>
+      <option value="updated">Recently updated</option>
+      <option value="attention">Needs attention first</option>
+      <option value="company">Company · A–Z</option>
+    </select></label></div>
     <div id="engine" class="provider-summary"></div>
     <div id="apps"></div>
   </section>

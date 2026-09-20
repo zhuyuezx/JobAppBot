@@ -249,8 +249,10 @@ class IntegrationTests(unittest.TestCase):
 
     def test_bridge_dispatch_handoff_and_resume(self):
         profile.save_settings({'codex_reasoning_effort': 'high'})
-        app = self.store.queue_application('test', 'codex-playwright')
+        app = self.store.queue_application('test', 'codex-playwright', {'codex_model': 'gpt-5.6-luna'})
+        profile.save_settings({'codex_model': 'gpt-6-astra', 'codex_reasoning_effort': 'low'})
         def fake(prompt, schema, *args, **kwargs):
+            self.assertEqual(args[0], 'gpt-5.6-luna')
             self.assertEqual(kwargs['reasoning_effort'], 'high')
             self.assertEqual(kwargs['browser_url'], 'http://127.0.0.1:8931/mcp')
             self.assertFalse(kwargs['cancelled']())
@@ -365,6 +367,61 @@ class IntegrationTests(unittest.TestCase):
                 with self.assertRaises(SystemExit):
                     parser.parse_args(args)
         self.assertEqual(parser.parse_args(['apply', 'queue', 'test', '--engine', 'codex-playwright']).engine, 'codex-playwright')
+
+    def test_application_launch_settings_are_validated_and_frozen(self):
+        before = profile.load_settings()
+        app = self.store.queue_application('test', 'claude-chrome', {'model': 'haiku', 'max_turns': 40})
+        self.assertEqual(app['settings']['model'], 'haiku')
+        self.assertEqual(profile.load_settings(), before)
+        profile.save_settings({'model': 'opus'})
+        self.assertEqual(self.store.queue_application('test', 'claude-chrome')['settings'], app['settings'])
+        with self.assertRaises(ValueError):
+            self.store.queue_application('test', 'claude-chrome', {'model': 'sonnet'})
+        add_job(self.store, 'new', 'https://example.com/new')
+        for settings in ({'codex_model': ''}, {'codex_reasoning_effort': 'invalid'}):
+            with self.assertRaises(ValueError):
+                self.store.queue_application('new', 'codex-playwright', settings)
+            self.assertIsNone(self.store.get_application('new'))
+
+    def test_claude_uses_per_application_model(self):
+        app = self.store.queue_application('test', 'claude-chrome', {'model': 'haiku'})
+        event = {'type': 'result', 'structured_output': result(), 'session_id': 'session'}
+        proc = unittest.mock.Mock(stdout=io.StringIO(json.dumps(event)+'\n'), returncode=0)
+        with patch.object(apply_engine, 'find_claude', return_value='claude'), patch.object(apply_engine.subprocess, 'Popen', return_value=proc) as run:
+            apply_engine.run_application(self.store, app)
+        cmd = run.call_args.args[0]
+        self.assertEqual(cmd[cmd.index('--model')+1], 'haiku')
+
+    def test_submission_time_is_stable_and_drives_default_order(self):
+        self.store.queue_application('test')
+        with patch('jobFilter.store._iso', return_value='2026-09-19T10:00:00+00:00'):
+            self.store.update_application('test', status='submitted')
+        add_job(self.store, 'newer', 'https://example.com/newer')
+        self.store.queue_application('newer')
+        with patch('jobFilter.store._iso', return_value='2026-09-20T10:00:00+00:00'):
+            self.store.update_application('newer', status='submitted')
+        self.store.update_application('test', status='submitted', note='Edited later')
+        self.assertEqual(self.store.get_application('test')['submitted_at'], '2026-09-19T10:00:00+00:00')
+        self.assertEqual([a['job_id'] for a in self.store.list_applications()], ['newer', 'test'])
+        self.store.update_application('test', status='review_ready')
+        with patch('jobFilter.store._iso', return_value='2026-09-21T10:00:00+00:00'):
+            self.store.update_application('test', status='submitted')
+        self.assertEqual(self.store.list_applications()[0]['job_id'], 'test')
+        self.assertFalse(self.store.get_application('test')['submitted_at_estimated'])
+
+    def test_legacy_submission_time_is_explicitly_estimated(self):
+        self.store.queue_application('test')
+        self.store.update_application('test', status='submitted')
+        old_time = self.store.get_application('test')['updated_at']
+        with self.store.conn:
+            self.store.conn.execute('ALTER TABLE applications DROP COLUMN submitted_at')
+            self.store.conn.execute('ALTER TABLE applications DROP COLUMN submitted_at_estimated')
+        self.store._migrate()
+        app = self.store.get_application('test')
+        self.assertEqual(app['submitted_at'], old_time)
+        self.assertTrue(app['submitted_at_estimated'])
+        self.store._migrate()
+        self.assertEqual(self.store.get_application('test'), app)
 
 
 if __name__ == "__main__":

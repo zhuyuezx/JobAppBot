@@ -1,9 +1,16 @@
 # ChatGPT subscription integration
 
-Use **AI settings → Application filling → ChatGPT / Codex → Save application provider**.
-Then open a job and click **Prepare with GPT**. The background worker fills the form,
-asks missing questions in jobFilter, resumes after you answer, and stops for your review.
-There is no desktop-chat copy/paste step for this option.
+Open a job in **Jobs**, then choose **Application provider**, **Application model**
+and **Thinking level** directly beside **Prepare application**. No trip to AI settings
+is needed. GPT models are loaded from the installed Codex CLI's cached model catalog.
+Choose an explicit model: new GPT configurations use `gpt-5.6-luna`, rather than
+implicitly accepting Codex's default. If no models appear, run Codex once while signed
+in to refresh its catalog and reload this page.
+
+The selected settings are saved with the application and shown in Applications.
+Retries and question continuation keep those choices, even if global defaults change.
+Existing applications created before this update retain their previous settings behavior.
+**AI settings → Application defaults** remains an optional place to set initial choices.
 
 | Option | Browser | How it starts |
 | --- | --- | --- |
@@ -105,13 +112,13 @@ Token usage is not a dollar cost, so Codex results do not invent a USD charge.
 
 ## GPT thinking level
 
-In **AI settings**, choose **GPT thinking level** separately for application filling
-and screening: **Model default**, **Low**, **Medium**, **High**, or **Extra high**.
+Choose **Thinking level** on the job before starting an application. In **AI settings**,
+set defaults for future applications or choose the independent screening level: **Model default**, **Low**, **Medium**, **High**, or **Extra high**.
 Save that section to apply the choice to the next run. Existing configurations use
 Model default. The optional model name is a separate advanced override; it is not
 a thinking-level field. Supported effort levels depend on the selected model.
 
-The saved `codex_reasoning_effort` is passed as Codex's `model_reasoning_effort`
+The application’s saved `codex_reasoning_effort` is passed as Codex's `model_reasoning_effort`
 for that run; personal Codex configuration and Claude settings are unchanged.
 See the [official configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
 
