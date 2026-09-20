@@ -43,11 +43,21 @@ def work_directory(job_id: str) -> Path:
     return d
 
 
+def structured_result(event):
+    """Read Claude's structured result, including its JSON-text fallback."""
+    if event.get("structured_output"):
+        return event["structured_output"]
+    text = event.get("result") or ""
+    try:
+        return json.loads(text) if text.lstrip().startswith("{") else {}
+    except ValueError:
+        return {}
+
+
 def claim_application(store, job_id):
     # Prepare local context before claiming, so a bad profile cannot strand a job.
     context = {"profile": profile.load_profile(), "answer_bank": profile.load_answers(),
                "resume_path": str(profile.resume_path() or ""), "resume_text": profile.resume_text()}
-    schema = json.loads(json.dumps(RESULT_SCHEMA))
     work = work_directory(job_id)
     with store.conn:
         store.conn.execute("BEGIN IMMEDIATE")
@@ -64,7 +74,7 @@ def claim_application(store, job_id):
     return {"job_id": app["job_id"], "claim_token": token, "job": app["job"],
             "previous_result": app.get("result"), "page_url": app.get("page_url"),
             "questions": store.questions(job_id=app["job_id"]), **context,
-            "screenshot_path": str(work / (token + ".png")), "result_schema": schema}
+            "screenshot_path": str(work / (token + ".png"))}
 
 
 def complete_application(store, job_id, token, result):
@@ -75,10 +85,12 @@ def complete_application(store, job_id, token, result):
     if any(not q["question"].strip() for q in result["unanswered_questions"]):
         raise ValueError("Questions cannot be blank")
     screenshot = result.get("screenshot_path") or None
+    if result["status"] == "review_ready" and not screenshot:
+        raise ValueError("review_ready requires the current claim's screenshot")
     if screenshot:
         expected = work_directory(job_id) / (token + ".png")
-        if Path(screenshot).resolve() != expected.resolve() or not expected.is_file():
-            raise ValueError("Screenshot must be the current claim's screenshot_path and exist on disk")
+        if Path(screenshot).resolve() != expected.resolve() or not expected.is_file() or not expected.stat().st_size:
+            raise ValueError("Screenshot must be the current claim's screenshot_path and contain a saved image")
     if result["status"] == "review_ready" and (not result["page_url"] or not result.get("filled_fields")):
         raise ValueError("review_ready requires a page URL and the fields verified in the browser")
     with store.conn:

@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 from jobFilter import bridge, profile
-from jobFilter.application_state import claim_application, complete_application
+from jobFilter.application_state import RESULT_SCHEMA, claim_application, complete_application
 from jobFilter.codex import CodexCancelled, run_codex
 
 
@@ -52,12 +52,9 @@ Keep the application tab open, and return the structured result. No shell tools 
 APPLICANT AND JOB DATA:
 {json.dumps(context, ensure_ascii=False)}
 """
-            result, meta = run_codex(prompt, task["result_schema"], settings.get("codex_model", ""),
-                                     settings.get("codex_timeout", 900), browser_url=url, log=log, cancelled=cancelled)
-            if result["status"] == "review_ready" and (not screenshot.is_file() or screenshot.stat().st_size == 0):
-                raise ValueError("Codex reported review_ready without saving the current review screenshot")
-            if result.get("screenshot_path") and Path(result["screenshot_path"]).resolve() != screenshot.resolve():
-                raise ValueError("Codex reported a screenshot from a different run")
+            result, meta = run_codex(prompt, RESULT_SCHEMA, settings.get("codex_model", ""),
+                                     settings.get("codex_timeout", 900), browser_url=url, log=log, cancelled=cancelled,
+                                     reasoning_effort=settings.get("codex_reasoning_effort", ""))
             saved = complete_application(store, app["job_id"], token, result)
             log(f"Completed: {saved['status']} ({meta['model']})")
             return saved

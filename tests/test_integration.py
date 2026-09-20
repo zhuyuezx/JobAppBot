@@ -54,6 +54,11 @@ class IntegrationTests(unittest.TestCase):
         self.store.close()
         self.tmp.cleanup()
 
+    def review_result(self, task):
+        path = Path(task['screenshot_path'])
+        path.write_bytes(b'test screenshot')
+        return {**result(), 'screenshot_path': str(path)}
+
     def test_defaults_and_provider_settings(self):
         self.assertEqual(profile.load_settings()["engine"], "claude-chrome")
         self.assertEqual(screen.screening_config({})["provider"], "claude")
@@ -95,6 +100,7 @@ class IntegrationTests(unittest.TestCase):
     def test_application_question_resume_one_time_answer(self):
         self.store.queue_application("test", "codex-playwright")
         task = application_state.claim_application(self.store, "test")
+        old_review = self.review_result(task)
         with self.assertRaises(ValueError):
             application_state.claim_application(self.store, "test")
         out = result("needs_answer")
@@ -107,26 +113,46 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(resumed["questions"][0]["answer"], "2026-10-01")
         self.assertEqual(resumed["page_url"], out["page_url"])
         with self.assertRaises(ValueError):
-            application_state.complete_application(self.store, "test", task["claim_token"], result())
-        application_state.complete_application(self.store, "test", resumed["claim_token"], result())
+            application_state.complete_application(self.store, "test", task["claim_token"], old_review)
+        application_state.complete_application(self.store, "test", resumed["claim_token"], self.review_result(resumed))
         self.assertEqual(self.store.get_application("test")["status"], "review_ready")
         self.assertEqual(self.store.questions(job_id="test")[0]["status"], "sent")
 
     def test_cancelled_application_cannot_overwrite(self):
         self.store.queue_application("test", "codex-playwright")
         task = application_state.claim_application(self.store, "test")
+        review = self.review_result(task)
         self.store.update_application("test", status="skipped")
         with self.assertRaises(ValueError):
-            application_state.complete_application(self.store, "test", task["claim_token"], result())
+            application_state.complete_application(self.store, "test", task["claim_token"], review)
         self.assertEqual(self.store.get_application("test")["status"], "skipped")
 
     def test_invalid_result_does_not_change_state(self):
         self.store.queue_application("test", "codex-playwright")
         task = application_state.claim_application(self.store, "test")
-        for out in [result("needs_answer"), {**result(), "filled_fields": []}, {**result(), "screenshot_path": "/tmp/old.png"}]:
+        review = self.review_result(task)
+        for out in [result("needs_answer"), {**review, "filled_fields": []}, {**review, "screenshot_path": "/tmp/old.png"}, result()]:
             with self.assertRaises(ValueError):
                 application_state.complete_application(self.store, "test", task["claim_token"], out)
+        Path(task['screenshot_path']).write_bytes(b'')
+        with self.assertRaisesRegex(ValueError, 'saved image'):
+            application_state.complete_application(self.store, 'test', task['claim_token'], review)
         self.assertEqual(self.store.get_application("test")["status"], "running")
+
+    def test_claude_result_fallbacks(self):
+        for event, expected in [({'structured_output': result(), 'result': 'ignored'}, result()),
+                                ({'result': '  ' + json.dumps(result())}, result()),
+                                ({'result': '{invalid json'}, {}), ({'result': 'Error'}, {}), ({}, {})]:
+            with self.subTest(event=event):
+                self.assertEqual(application_state.structured_result(event), expected)
+
+    def test_browser_clients_reject_nonlocal_endpoints_before_connecting(self):
+        for url in ('https://127.0.0.1:8931/mcp', 'http://example.com/mcp', 'http://user@127.0.0.1/mcp',
+                    'http://127.0.0.1/mcp?x=1', 'http://127.0.0.1/mcp#fragment', 'http://127.0.0.1/other'):
+            with self.subTest(url=url), patch.object(bridge.Session, 'request') as request:
+                with self.assertRaises(ValueError):
+                    bridge.Session(url)
+                request.assert_not_called()
 
     def test_claude_command_and_resume_preserved(self):
         app = self.store.queue_application("test")
@@ -170,15 +196,39 @@ class IntegrationTests(unittest.TestCase):
             self.assertEqual(kwargs["input"], "test prompt")
             self.assertNotIn("OPENAI_API_KEY", kwargs["env"])
             self.assertIn('forced_login_method="chatgpt"', cmd)
+            self.assertIn('model_reasoning_effort="high"', cmd)
             schema = json.loads(Path(cmd[cmd.index("--output-schema") + 1]).read_text())
             self.assertFalse(schema["additionalProperties"])
             Path(cmd[cmd.index("--output-last-message") + 1]).write_text(json.dumps(VERDICT))
             return subprocess.CompletedProcess(cmd, 0, '{"type":"turn.completed","usage":{"output_tokens":42}}', '')
         with patch.dict(os.environ, {"OPENAI_API_KEY": "must-not-use"}), patch.object(codex, "find_codex", return_value="codex"), patch.object(codex.subprocess, "run", side_effect=fake):
-            out, meta = codex.run_codex("test prompt", screen.SCHEMA)
+            out, meta = codex.run_codex("test prompt", screen.SCHEMA, reasoning_effort="high")
         self.assertEqual(out, VERDICT)
         self.assertIsNone(meta["total_cost_usd"])
         self.assertEqual(screen.SCHEMA, original)
+
+    def test_thinking_settings_are_independent_and_validate_before_saving(self):
+        config = self.root / 'search.json'
+        config.write_text(json.dumps({'rules': {'max_min_yoe': 1}, 'screening': {'model': 'haiku'}}))
+        profile.save_settings({'codex_reasoning_effort': 'high'})
+        screen.save_screening_settings(config, {'codex_reasoning_effort': 'low'})
+        self.assertEqual(profile.load_settings()['codex_reasoning_effort'], 'high')
+        self.assertEqual(screen.screening_config(json.loads(config.read_text()))['codex_reasoning_effort'], 'low')
+        original_app, original_search = profile.SETTINGS_PATH.read_text(), config.read_text()
+        for invalid in ('unknown', None, [], 3):
+            with self.assertRaises(ValueError):
+                profile.save_settings({'codex_reasoning_effort': invalid})
+            with self.assertRaises(ValueError):
+                screen.save_screening_settings(config, {'codex_reasoning_effort': invalid})
+        self.assertEqual(profile.SETTINGS_PATH.read_text(), original_app)
+        self.assertEqual(config.read_text(), original_search)
+        self.assertEqual(profile.load_settings()['model'], 'opus')
+
+    def test_thinking_level_reaches_screening_runner(self):
+        cfg = screen.screening_config({'screening': {'provider': 'codex', 'codex_reasoning_effort': 'medium'}})
+        with patch.object(screen, 'fetch_description', return_value='No sponsorship.'), patch.object(screen, 'run_codex', return_value=(VERDICT, {})) as run:
+            screen.screen_job(self.store, self.store.get('test'), cfg)
+        self.assertEqual(run.call_args.kwargs['reasoning_effort'], 'medium')
 
     def test_codex_runner_reports_quota(self):
         proc = subprocess.CompletedProcess([], 1, '{"type":"turn.failed","error":{"message":"Usage limit reached"}}', '')
@@ -198,8 +248,10 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual((saved['model'], saved['max_turns'], saved['codex_model'], saved['codex_timeout']), ('opus', 120, 'gpt-test', 600))
 
     def test_bridge_dispatch_handoff_and_resume(self):
+        profile.save_settings({'codex_reasoning_effort': 'high'})
         app = self.store.queue_application('test', 'codex-playwright')
         def fake(prompt, schema, *args, **kwargs):
+            self.assertEqual(kwargs['reasoning_effort'], 'high')
             self.assertEqual(kwargs['browser_url'], 'http://127.0.0.1:8931/mcp')
             self.assertFalse(kwargs['cancelled']())
             current = self.store.get_application('test')

@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-from jobFilter.providers import CLAUDE, migrate_engine, validate_engine
+from jobFilter.providers import CLAUDE, migrate_engine, validate_engine, validate_thinking_level
 
 ROOT = Path(__file__).resolve().parent.parent
 SETUP_DIR = ROOT / "setup"
@@ -26,7 +26,7 @@ RESUME_TEXT_PATH = PROFILE_DIR / "resume.txt"
 RESUME_DIR = SETUP_DIR / "resume"
 SETTINGS_PATH = PROFILE_DIR / "settings.json"
 DEFAULT_SETTINGS: dict[str, Any] = {"engine": CLAUDE, "model": "opus", "max_turns": 120,
-                                  "codex_model": "", "codex_timeout": 900}
+                                  "codex_model": "", "codex_reasoning_effort": "", "codex_timeout": 900}
 MODEL_CHOICES = ["opus", "sonnet", "haiku"]
 TEMPLATE_PATH = SETUP_DIR / "profile.template.json"
 
@@ -199,6 +199,8 @@ def save_settings(updates: dict[str, Any]) -> dict[str, Any]:
         data["max_turns"] = max(10, min(400, int(updates["max_turns"])))
     if "codex_model" in updates:
         data["codex_model"] = str(updates["codex_model"]).strip()
+    if "codex_reasoning_effort" in updates:
+        data["codex_reasoning_effort"] = validate_thinking_level(updates["codex_reasoning_effort"])
     if "codex_timeout" in updates:
         data["codex_timeout"] = max(30, min(3600, int(updates["codex_timeout"])))
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)

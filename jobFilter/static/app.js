@@ -41,6 +41,7 @@ $('#tabs').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
   clearTimeout(appsTimer);
   tab = b.dataset.tab;
+  history.replaceState(null, '', '#' + tab);
   document.querySelectorAll('#tabs button').forEach(x => x.classList.toggle('on', x === b));
   ['jobs', 'apps', 'profile', 'settings'].forEach(t => $('#tab-' + t).hidden = t !== tab);
   $('#jobsControls').style.display = tab === 'jobs' ? 'contents' : 'none';
@@ -181,6 +182,8 @@ $('#list').addEventListener('click', async e => {
 // ---------------- applications ----------------
 let apps = [], openApp = null, appsTimer = null;
 let applicationEngine = 'claude-chrome', screeningProvider = 'claude', screeningEnabled = true;
+const ATTENTION_STATUSES = ['review_ready', 'needs_answer', 'needs_login', 'captcha'];
+function updateAttention(count) { $('#appsBadge').hidden = !count; $('#appsBadge').textContent = count; }
 const providerName = engine => ({'codex-playwright': 'ChatGPT / Codex', 'codex': 'ChatGPT / Codex'}[engine] || 'Claude Code');
 function engineBanner(st) {
   applicationEngine = st.settings.engine;
@@ -192,8 +195,9 @@ async function refreshProviders() {
     const [st, sc] = await Promise.all([api('/api/engine'), api('/api/screening-settings')]);
     if (st.error) throw new Error(st.error);
     applicationEngine = st.settings.engine;
+    updateAttention(ATTENTION_STATUSES.reduce((n, status) => n + (st.counts[status] || 0), 0));
     if (sc.settings) { screeningProvider = sc.settings.provider; screeningEnabled = sc.settings.enabled; }
-    const screening = sc.settings ? (sc.settings.enabled ? providerName(sc.settings.provider === 'codex' ? 'codex' : 'claude-chrome') : 'Paused') : 'Unavailable';
+    const screening = sc.settings ? (sc.settings.enabled ? providerName(sc.settings.provider) : 'Paused') : 'Unavailable';
     $('#providerSummary').innerHTML = `<span>Screening: <strong>${screening}</strong></span><span>Applications: <strong>${providerName(applicationEngine)}</strong></span><a href="#settings">Change AI providers</a>`;
     if (tab === 'jobs') render();
   } catch (_) { $('#providerSummary').innerHTML = 'Could not load providers. <a href="#settings">Open AI settings</a>'; }
@@ -204,6 +208,9 @@ function providerCards(name, selected, application) {
     <label class="provider-card"><input type="radio" name="${name}" value="codex" ${selected === 'codex' ? 'checked' : ''}><span><strong>ChatGPT / Codex</strong><small>${application ? 'Starts automatically when you click Prepare with GPT. Uses a dedicated Chrome window.' : 'Checks sponsorship and fit automatically using your ChatGPT subscription.'}</small></span></label>
     </div></fieldset>`;
 }
+function thinkingSelect(id, selected = '') {
+  return `<label>GPT thinking level<select id="${id}">${[['', 'Model default'], ['low', 'Low · faster'], ['medium', 'Medium · balanced'], ['high', 'High · more thorough'], ['xhigh', 'Extra high · most thorough']].map(([value, label]) => `<option value="${value}" ${selected === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label>`;
+}
 function settingMessage(id, text, error = false) { const el = $(id); el.textContent = text; el.classList.toggle('error', error); }
 function renderApplicationSettings(st) {
   const saved = st.settings, selected = saved.engine === 'codex-playwright' ? 'codex' : 'claude';
@@ -211,7 +218,7 @@ function renderApplicationSettings(st) {
     ${providerCards('applicationProvider', selected, true)}
     <div id="applicationGuide"></div>
     <div id="claudeSettings" class="settings-fields"><label>Claude model<input id="modelInp" type="text" value="${esc(saved.model)}" list="claudeModels"><datalist id="claudeModels">${st.model_choices.map(m => `<option value="${esc(m)}">`).join('')}</datalist></label><label>Maximum turns<input id="turnsInp" type="text" inputmode="numeric" value="${saved.max_turns}"></label></div>
-    <div id="gptSettings" class="settings-fields"><label>GPT application model (optional)<input id="appCodexModel" type="text" placeholder="Use Codex default" value="${esc(saved.codex_model || '')}"></label><label>Timeout in seconds<input id="appCodexTimeout" type="number" min="30" max="3600" value="${saved.codex_timeout || 900}"></label></div>
+    <div id="gptSettings" class="settings-fields">${thinkingSelect('appThinking', saved.codex_reasoning_effort)}<label>GPT application model (optional)<input id="appCodexModel" type="text" placeholder="Use Codex default" value="${esc(saved.codex_model || '')}"></label><label>Timeout in seconds<input id="appCodexTimeout" type="number" min="30" max="3600" value="${saved.codex_timeout || 900}"></label></div>
     <p class="help">Profile: ${st.profile.profile_exists ? 'saved' : 'not saved'} · Resume: ${st.profile.resume ? esc(st.profile.resume.split('/').pop()) : 'not added'}. <a href="#profile">Edit profile and answers</a></p>
     <div class="actions"><button class="btn primary" id="saveApplication">Save application provider</button><span id="applicationMsg" class="status-message" role="status"></span></div>`;
   function preview() {
@@ -232,7 +239,7 @@ function renderApplicationSettings(st) {
   $('#saveApplication').onclick = async () => {
     const button = $('#saveApplication'); button.disabled = true;
     try {
-      const r = await api('/api/settings', {engine: {claude: 'claude-chrome', codex: 'codex-playwright'}[$('input[name="applicationProvider"]:checked').value], codex_model: $('#appCodexModel').value, codex_timeout: Number($('#appCodexTimeout').value), model: $('#modelInp').value, max_turns: Number($('#turnsInp').value) || 120});
+      const r = await api('/api/settings', {engine: {claude: 'claude-chrome', codex: 'codex-playwright'}[$('input[name="applicationProvider"]:checked').value], codex_reasoning_effort: $('#appThinking').value, codex_model: $('#appCodexModel').value, codex_timeout: Number($('#appCodexTimeout').value), model: $('#modelInp').value, max_turns: Number($('#turnsInp').value) || 120});
       if (r.error) throw new Error(r.error);
       $('#modelInp').value = r.model; $('#turnsInp').value = r.max_turns;
       applicationEngine = r.engine; $('#savedAppProvider').textContent = providerName(r.engine);
@@ -243,12 +250,12 @@ function renderApplicationSettings(st) {
 }
 function renderScreeningSettings(sc) {
   const saved = sc.settings;
-  $('#screeningSettings').innerHTML = `<h2>Job screening</h2><p class="help">Sponsorship checks and fit scores. Independent of application filling. Saved provider: <strong id="savedScreenProvider">${providerName(saved.provider === 'codex' ? 'codex' : 'claude-chrome')}</strong>.</p>
+  $('#screeningSettings').innerHTML = `<h2>Job screening</h2><p class="help">Sponsorship checks and fit scores. Independent of application filling. Saved provider: <strong id="savedScreenProvider">${providerName(saved.provider)}</strong>.</p>
     ${providerCards('screeningProvider', saved.provider, false)}
     <label><input id="screenEnabled" type="checkbox" ${saved.enabled ? 'checked' : ''}> Screen new jobs automatically after each scan</label>
     <div id="screeningGuide" class="provider-guide"></div>
     <div class="settings-fields"><label id="screenClaudeField">Claude screening model<input id="screenClaudeModel" type="text" value="${esc(saved.model)}"></label>
-    <label id="screenCodexField">GPT screening model (optional)<input id="screenCodexModel" type="text" placeholder="Use Codex default" value="${esc(saved.codex_model)}"></label></div>
+    <div id="screenCodexField">${thinkingSelect('screenThinking', saved.codex_reasoning_effort)}<label>GPT screening model (optional)<input id="screenCodexModel" type="text" placeholder="Use Codex default" value="${esc(saved.codex_model)}"></label></div></div>
     <div class="actions"><button class="btn primary" id="saveScreening">Save screening provider</button><span id="screeningMsg" class="status-message" role="status"></span></div>`;
   function preview() {
     const gpt = $('input[name="screeningProvider"]:checked').value === 'codex';
@@ -260,9 +267,9 @@ function renderScreeningSettings(sc) {
   $('#saveScreening').onclick = async () => {
     const button = $('#saveScreening'); button.disabled = true;
     try {
-      const r = await api('/api/screening-settings', {provider: $('input[name="screeningProvider"]:checked').value, enabled: $('#screenEnabled').checked, model: $('#screenClaudeModel').value, codex_model: $('#screenCodexModel').value});
+      const r = await api('/api/screening-settings', {provider: $('input[name="screeningProvider"]:checked').value, enabled: $('#screenEnabled').checked, model: $('#screenClaudeModel').value, codex_model: $('#screenCodexModel').value, codex_reasoning_effort: $('#screenThinking').value});
       if (r.error) throw new Error(r.error);
-      $('#savedScreenProvider').textContent = providerName(r.provider === 'codex' ? 'codex' : 'claude-chrome');
+      $('#savedScreenProvider').textContent = providerName(r.provider);
       settingMessage('#screeningMsg', 'Saved. Applies to the next scan and manual screenings.');
     } catch (e) { settingMessage('#screeningMsg', 'Could not save: ' + e.message, true); }
     finally { button.disabled = false; }
@@ -309,14 +316,13 @@ function appDetails(a) {
 function renderApps() {
   const counts = {}; apps.forEach(a => counts[a.status] = (counts[a.status] || 0) + 1);
   $('#count').textContent = Object.entries(counts).map(([k, v]) => `${v} ${STATUS_LABEL[k] || k}`).join(' · ');
-  const attention = apps.filter(a => ['review_ready', 'needs_answer', 'needs_login', 'captcha'].includes(a.status)).length;
-  $('#appsBadge').hidden = !attention; $('#appsBadge').textContent = attention;
+  updateAttention(apps.filter(a => ATTENTION_STATUSES.includes(a.status)).length);
   if (!apps.length) { $('#apps').innerHTML = '<div class="empty">No applications yet. Open a job in Jobs and choose Prepare with Claude or Prepare with GPT.</div>'; return; }
   const order = ['needs_answer', 'review_ready', 'needs_login', 'captcha', 'running', 'queued', 'failed', 'already_applied', 'submitted', 'skipped'];
   apps.sort((x, y) => order.indexOf(x.status) - order.indexOf(y.status) || (y.updated_at > x.updated_at ? 1 : -1));
   $('#apps').innerHTML = apps.map(a => `<div class="app ${openApp === a.job_id ? 'open' : ''}" data-id="${esc(a.job_id)}">
       <div class="row">
-        <div class="title"><span class="chev" aria-hidden="true">&#9654;</span><a href="${esc(a.job.apply_url || a.hc_url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(a.job.title)}</a>${badge(a.status)}${`<span class="badge">${providerName(a.engine)}</span>`}${a.open_questions ? `<span class="badge warn">${a.open_questions} question${a.open_questions > 1 ? 's' : ''}</span>` : ''}</div>
+        <div class="title"><span class="chev" aria-hidden="true">&#9654;</span><a href="${esc(a.job.apply_url || a.hc_url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(a.job.title)}</a>${badge(a.status)}<span class="badge">${providerName(a.engine)}</span>${a.open_questions ? `<span class="badge warn">${a.open_questions} question${a.open_questions > 1 ? 's' : ''}</span>` : ''}</div>
         <div class="muted">${esc(a.job.company)}</div>
         <div class="muted">${esc(a.summary || '').slice(0, 80)}</div>
         <div class="muted">${fmt(a.updated_at)}</div>
@@ -383,7 +389,5 @@ $('#answers').addEventListener('click', async e => {
 
 function showTab(name) { const b = document.querySelector(`#tabs button[data-tab="${name}"]`); if (b) b.click(); }
 window.addEventListener('hashchange', () => showTab(location.hash.slice(1) || 'jobs'));
-$('#tabs').addEventListener('click', e => { const b = e.target.closest('button'); if (b) history.replaceState(null, '', '#' + b.dataset.tab); });
 refreshProviders();
 loadDates().then(load).then(() => { if (location.hash && location.hash !== '#jobs') showTab(location.hash.slice(1)); });
-api('/api/engine').then(st => { const n = (st.counts.review_ready || 0) + (st.counts.needs_answer || 0) + (st.counts.needs_login || 0) + (st.counts.captcha || 0); $('#appsBadge').hidden = !n; $('#appsBadge').textContent = n; });

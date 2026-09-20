@@ -112,6 +112,7 @@
     "provider": "claude",
     "_provider": "claude (default) or codex. Codex uses your ChatGPT login; run codex login first.",
     "codex_model": "",
+    "codex_reasoning_effort": "",
     "_codex_model": "Empty uses the Codex CLI default model. Separate from the Claude model below.",
     "codex_timeout": 300,
     "_model": "Claude Code model alias: sonnet (default), haiku, opus.",

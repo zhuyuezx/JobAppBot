@@ -16,7 +16,6 @@ import json
 import os
 import shutil
 import subprocess
-import sys
 import threading
 import time
 from pathlib import Path
@@ -24,7 +23,7 @@ from typing import Any, Optional
 
 from jobFilter import profile as prof
 from jobFilter.store import Store
-from jobFilter.application_state import RESULT_SCHEMA, work_directory
+from jobFilter.application_state import RESULT_SCHEMA, structured_result, work_directory
 from jobFilter.providers import CLAUDE, CODEX, validate_engine
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -197,7 +196,7 @@ def run_application(store: Store, app: dict[str, Any]) -> dict[str, Any]:
         store.update_application(job_id, status="failed", summary="claude binary not found (set JOBFILTER_CLAUDE)")
         return {"status": "failed"}
 
-    answered = [q for q in store.questions(job_id=job_id, status="answered")]
+    answered = store.questions(job_id=job_id, status="answered")
     last_status = (app.get("result") or {}).get("status")
     # Resume the same Claude session when the user answered questions or finished a login/CAPTCHA handoff;
     # otherwise (first run, or a retry after a hard failure) start fresh.
@@ -234,14 +233,8 @@ def run_application(store: Store, app: dict[str, Any]) -> dict[str, Any]:
                 result_evt = evt
         proc.wait()
 
-    out = result_evt.get("structured_output") or {}
-    if not out:
-        text = result_evt.get("result") or ""
-        try:  # model may still have produced JSON text
-            out = json.loads(text) if text.strip().startswith("{") else {}
-        except ValueError:
-            out = {}
-    status = out.get("status") or ("failed" if (proc.returncode or result_evt.get("is_error")) else "failed")
+    out = structured_result(result_evt)
+    status = out.get("status") or "failed"
     summary = out.get("summary") or (result_evt.get("result") or f"claude exited {proc.returncode}")[:2000]
     screenshot = _store_screenshot(out.get("screenshot_path"), work_dir)
     added = append_lessons(out.get("lessons") or [], app["job"].get("company") or job_id)

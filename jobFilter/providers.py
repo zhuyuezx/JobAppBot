@@ -14,3 +14,13 @@ def validate_engine(engine):
 
 def migrate_engine(engine):
     return CODEX if engine == LEGACY_CODEX else engine
+
+
+# Common levels supported by the installed Codex model catalog. Empty uses model default.
+THINKING_LEVELS = ("", "low", "medium", "high", "xhigh")
+
+
+def validate_thinking_level(value):
+    if value not in THINKING_LEVELS:
+        raise ValueError("GPT thinking level must be default, low, medium, high or xhigh")
+    return value

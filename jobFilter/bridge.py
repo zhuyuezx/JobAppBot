@@ -13,6 +13,7 @@ import threading
 import time
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parent.parent
 PACKAGE_VERSION = "0.0.81"
@@ -32,6 +33,13 @@ def port():
 
 def endpoint():
     return f"http://127.0.0.1:{port()}/mcp"
+
+
+def validate_endpoint(url):
+    parsed = urlsplit(url)
+    if parsed.scheme != "http" or parsed.hostname != "127.0.0.1" or parsed.path != "/mcp" or parsed.username or parsed.query or parsed.fragment:
+        raise ValueError("Browser bridge must use http://127.0.0.1:PORT/mcp")
+    return url
 
 
 def executable():
@@ -61,11 +69,7 @@ def status():
 class Session:
     """Minimal Streamable HTTP MCP client; the daemon retains an owner session."""
     def __init__(self, url):
-        from urllib.parse import urlsplit
-        parsed = urlsplit(url)
-        if parsed.scheme != "http" or parsed.hostname != "127.0.0.1" or parsed.path != "/mcp" or parsed.username or parsed.query or parsed.fragment:
-            raise ValueError("Browser bridge must use http://127.0.0.1:PORT/mcp")
-        self.url, self.session_id, self.sequence = url, None, 0
+        self.url, self.session_id, self.sequence = validate_endpoint(url), None, 0
         self.request("initialize", {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "jobfilter-browser-owner", "version": "1"}})
         self.request("notifications/initialized", {}, notify=True)
 
@@ -104,9 +108,10 @@ class Session:
 
 def ensure_running():
     with _start_lock:
-        if status()["running"]:
-            return endpoint()
-        if not status()["installed"]:
+        current = status()
+        if current["running"]:
+            return current["url"]
+        if not current["installed"]:
             raise RuntimeError(f"Browser bridge is not installed. Run: npm install --prefix data/browser-tools --save-exact @playwright/mcp@{PACKAGE_VERSION}")
         directory().mkdir(parents=True, exist_ok=True)
         with (directory() / "bridge.log").open("a") as log:

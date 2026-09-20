@@ -14,6 +14,8 @@ import time
 from pathlib import Path
 
 from jsonschema import validate
+from jobFilter.bridge import validate_endpoint
+from jobFilter.providers import validate_thinking_level
 
 
 class CodexUnavailable(RuntimeError):
@@ -96,7 +98,8 @@ def strict_schema(schema):
     return result
 
 
-def run_codex(prompt, schema, model="", timeout=300, *, browser_url=None, log=lambda _: None, cancelled=None):
+def run_codex(prompt, schema, model="", timeout=300, *, reasoning_effort="", browser_url=None, log=lambda _: None, cancelled=None):
+    validate_thinking_level(reasoning_effort)
     binary = find_codex()
     if not binary:
         raise CodexUnavailable("Codex not found; install it or set JOBFILTER_CODEX, then run codex login.")
@@ -109,14 +112,13 @@ def run_codex(prompt, schema, model="", timeout=300, *, browser_url=None, log=la
                "-c", 'forced_login_method="chatgpt"', "-c", 'web_search="disabled"' if browser_url else 'web_search="live"',
                "-c", "features.shell_tool=false", "-c", "features.apply_patch_freeform=false"]
         if browser_url:
-            from urllib.parse import urlsplit
-            parsed = urlsplit(browser_url)
-            if parsed.scheme != "http" or parsed.hostname != "127.0.0.1" or parsed.path != "/mcp" or parsed.username or parsed.query or parsed.fragment:
-                raise ValueError("Codex browser URL must be a loopback MCP endpoint")
+            validate_endpoint(browser_url)
             for setting in [f"url={json.dumps(browser_url)}", "required=true", "tool_timeout_sec=90",
                             'default_tools_approval_mode="approve"',
                             'disabled_tools=["browser_close","browser_install"]']:
                 cmd += ["-c", "mcp_servers.jobfilter_browser." + setting]
+        if reasoning_effort:
+            cmd += ["-c", "model_reasoning_effort=" + json.dumps(reasoning_effort)]
         if model:
             cmd += ["--model", model]
         cmd.append("-")
@@ -141,6 +143,6 @@ def run_codex(prompt, schema, model="", timeout=300, *, browser_url=None, log=la
         validate(result, schema)
         usage = next((e.get("usage") for e in reversed(events) if e.get("type") == "turn.completed"), None)
         return result, {"model": "codex/" + (model or "default"), "usage": usage,
-                        "total_cost_usd": None,
+                        "total_cost_usd": None, "reasoning_effort": reasoning_effort or "default",
                         "tool_types": sorted({e.get("item", {}).get("type", "") for e in events
                                               if e.get("type") == "item.completed"})}

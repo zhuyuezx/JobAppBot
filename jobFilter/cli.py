@@ -22,7 +22,6 @@ from typing import Any
 
 from jobFilter import schema
 from jobFilter.filters import apply_rules
-from jobFilter.hiringcafe import HiringCafeClient, HiringCafeError  # noqa: F401  (used by `show`-style helpers and tests)
 from jobFilter.models import Job
 
 ROOT = Path(__file__).resolve().parent.parent

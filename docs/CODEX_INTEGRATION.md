@@ -103,6 +103,32 @@ Authentication/quota failures pause a batch; untouched jobs remain unscreened fo
 a later scan. Other failures are recorded and can be retried using `--job`.
 Token usage is not a dollar cost, so Codex results do not invent a USD charge.
 
+## GPT thinking level
+
+In **AI settings**, choose **GPT thinking level** separately for application filling
+and screening: **Model default**, **Low**, **Medium**, **High**, or **Extra high**.
+Save that section to apply the choice to the next run. Existing configurations use
+Model default. The optional model name is a separate advanced override; it is not
+a thinking-level field. Supported effort levels depend on the selected model.
+
+The saved `codex_reasoning_effort` is passed as Codex's `model_reasoning_effort`
+for that run; personal Codex configuration and Claude settings are unchanged.
+See the [official configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
+
+## reCAPTCHA and browser blocks
+
+Both providers can encounter reCAPTCHA. It assesses browser interactions and risk
+signals, including cookies; it is not specific to GPT. Claude uses your existing
+Chrome session, while the GPT bridge uses a separate persistent automation profile.
+That difference may affect challenges, but does not establish why a particular site
+blocked a request. Increasing thinking level does not remove site-side restrictions.
+
+When a CAPTCHA is reported, take over in that provider's browser window. After you
+complete it, click **Run again**. A site may still reject the session; neither pathway
+can guarantee access. Both runners are instructed to stop at CAPTCHA rather than
+repeatedly attempt it. See Google's [reCAPTCHA keys overview](https://docs.cloud.google.com/recaptcha/docs/keys)
+and [FAQ](https://docs.cloud.google.com/recaptcha/docs/faq).
+
 ## Upgrading from the retired manual pathway
 
 The manual desktop-chat option and its CLI commands have been removed. Saved manual
@@ -141,7 +167,7 @@ HTTP queue → background Codex run → resume upload → missing start-date que
 Answer once → automatic continuation in the same tab → final review screenshot.
 All five expected field values matched, with two attempts, one page load and zero
 submissions. The review tab remained open after Codex exited. The report is in
-`data/codex-verification/bridge-refactor-20260919/report.json` (ignored test output).
+`data/codex-verification/bridge-cleanup-20260919/report.json` (ignored test output).
 The refactored integration is verified with `tests/live_bridge.py`; each run writes a
 `report.json` and review screenshots beneath its isolated `--dir`. The test consumes
 subscription quota and never uses the production queue or applicant profile.
