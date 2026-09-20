@@ -69,6 +69,23 @@ class IntegrationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             screen.screening_config({"screening": {"provider": "invalid"}})
 
+    def test_yc_visa_restriction_cannot_be_overridden_by_either_provider(self):
+        description = ('YC Visa Sponsorship: US citizen/visa only\n\n'
+                       'Work authorization: willing to sponsor certain employment visas.')
+        optimistic = {**VERDICT, 'statement': 'sponsors', 'verdict': 'likely',
+                      'summary': 'Likely sponsor.', 'company_verdict': 'likely'}
+        for provider, runner in [('claude', 'run_claude'), ('codex', 'run_codex')]:
+            with self.subTest(provider=provider), \
+                 patch.object(screen, 'fetch_description', return_value=description), \
+                 patch.object(screen, runner, return_value=(optimistic, {})):
+                cfg = screen.screening_config({'screening': {'provider': provider}})
+                result = screen.screen_job(self.store, self.store.get('test'), cfg)
+            self.assertEqual(result['verdict'], 'unknown')
+            self.assertIn('employer confirmation', result['summary'])
+            self.assertIn('YC Visa Sponsorship: US citizen/visa only', result['evidence'])
+            self.assertIn('Work authorization: willing to sponsor certain employment visas.', result['evidence'])
+            self.assertFalse(result['requires_citizenship'])
+
     def test_frontend_screening_settings_preserve_search_and_claude_model(self):
         path = self.root / "search.json"
         original = {"search_state": {"searchQuery": "software engineer"}, "rules": {"max_min_yoe": 1},

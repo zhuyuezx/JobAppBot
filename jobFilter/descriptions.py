@@ -25,6 +25,24 @@ def fetch_description(row: dict[str, Any]) -> str:
     """Best-effort plain-text description; empty string when no server-side path exists."""
     job = row["job"]
     url = job.get("apply_url") or ""
+    parsed = urllib.parse.urlparse(url)
+    # YC's careers board loads job details separately, including a visa sidebar
+    # that HiringCafe's description-only API drops. Prefer the original posting.
+    if parsed.hostname in {"www.ycombinator.com", "ycombinator.com"} and parsed.path.rstrip("/") == "/careers":
+        job_id = urllib.parse.parse_qs(parsed.query).get("job_id", [""])[0]
+        if job_id.isdigit():
+            try:
+                r = requests.get(f"https://www.workatastartup.com/embed/y-combinator/jobs/{job_id}",
+                                 impersonate="chrome", timeout=60, headers={"X-Page-Url": url})
+                r.raise_for_status()
+                posting = r.json()["job"]
+                if str(posting["id"]) != job_id or not posting.get("description"):
+                    raise ValueError("YC job details missing or mismatched")
+                visa = posting.get("pretty_sponsors_visa") or "Not specified"
+                return f"YC Visa Sponsorship: {visa}\n\n" + html_to_text(posting["description"])
+            except Exception:
+                # Do not silently replace an unverified original with aggregator text.
+                return "YC Visa Sponsorship: verification unavailable\nFetch the original apply URL, including its visa sidebar."
     try:
         if job.get("via") == "hiringcafe":
             return HiringCafeClient().job_description_text(row["id"])

@@ -132,7 +132,7 @@ TASKS
 1. Read the posting text below (fetch the apply URL with WebFetch if the text is missing or truncated). Decide `statement`: does it say it sponsors / will not sponsor (or requires current authorization without sponsorship) / says nothing. Set `requires_citizenship` if it needs US citizenship, permanent residency, a security clearance, or ITAR/export-control eligibility. Quote the exact sentences in `evidence`.
 2. Company sponsorship history, unless KNOWN COMPANY SPONSORSHIP is given above: use WebSearch (2-4 searches, e.g. "<company> H-1B", "<company> h1bdata", "<company> visa sponsorship new grad") and WebFetch the most useful result (h1bdata.info, myvisajobs.com, h1bgrader.com, the company's careers FAQ). Record concrete facts with years and counts in `company_evidence` and the URLs in `sources`. Judge `company_verdict`: likely = files H-1B petitions regularly for software roles and no stated no-sponsorship policy; unlikely = few or no filings or a stated policy against sponsorship; unknown otherwise.
 3. `new_grad_fit`: true if 0-1 years or a recent degree qualifies.
-4. `verdict`: unlikely if statement is no_sponsorship or requires_citizenship; likely if statement is sponsors; otherwise the company verdict. `fit_score` 0-10 with unlikely capped at 2. `summary`: one or two plain sentences.
+4. `verdict`: unlikely if statement is no_sponsorship or requires_citizenship; likely if statement is sponsors; otherwise the company verdict. Conflicting job-specific visa fields and description text mean unknown, requiring employer confirmation; company history cannot resolve this conflict. "US citizen/visa only" does not mean citizens only and does not establish future H-1B sponsorship. Include both conflicting statements in evidence and explain the conflict in summary. `fit_score` 0-10 with unlikely capped at 2. `summary`: one or two plain sentences.
 
 Be fast: do not browse beyond what is needed for these fields.
 
@@ -192,6 +192,25 @@ def screen_job(store: Store, row: dict[str, Any], cfg: dict[str, Any]) -> dict[s
         "cost_usd": evt.get("total_cost_usd"), "seconds": round(time.time() - t0, 1),
         "description_chars": len(description),
     }
+    visa_field = description.splitlines()[0] if description else ""
+    if visa_field in {"YC Visa Sponsorship: US citizen/visa only", "YC Visa Sponsorship: verification unavailable"}:
+        # Neither model nor cached company history can turn this unresolved
+        # role-level restriction (or missing verification) into a sponsorship promise.
+        data["verdict"] = "unknown"
+        data["statement"] = "not_mentioned"
+        visa_quotes = [line.strip() for line in description.splitlines()
+                       if "work authorization:" in line.lower()]
+        data["evidence"] = list(dict.fromkeys([visa_field] + visa_quotes + data["evidence"]))
+        data["sources"] = list(dict.fromkeys([job["apply_url"]] + data["sources"]))
+        data["summary"] = (
+            "YC's visa field says 'US citizen/visa only'; future sponsorship needs employer confirmation. "
+            "Any sponsorship language in the description or company history does not resolve this restriction."
+            if visa_field.endswith("US citizen/visa only") else
+            "YC's original visa field could not be verified; sponsorship needs confirmation."
+        )
+    elif data["statement"] == "no_sponsorship" or data["requires_citizenship"]:
+        data["verdict"] = "unlikely"
+        data["fit_score"] = min(data["fit_score"], 2)
     store.save_screening(row["id"], data)
     if ckey and not cached and out.get("company_verdict"):
         store.save_company_sponsorship(ckey, job.get("company") or "", out["company_verdict"],
