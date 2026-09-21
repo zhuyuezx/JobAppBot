@@ -22,6 +22,7 @@ function spBadge(sc) {
 function screenBlock(r) {
   const sc = r.screening;
   const btn = `<button class="btn" data-act="screen">${sc ? 'Screen again' : 'Screen now'} · ${screeningProvider === 'codex' ? 'GPT' : 'Claude'}</button>`;
+  if (!sc && r.filter_reason) return `<div class="screen"><p class="sum">Excluded by your rules: <strong>${esc(r.filter_reason)}</strong>. Automatic screening is skipped; you can still review or screen this posting manually.</p>${btn}</div>`;
   if (!sc) return `<div class="screen"><p class="sum muted" style="white-space:normal">Not screened yet. ${screeningEnabled ? 'New jobs are screened automatically after each hourly scan.' : 'Automatic screening is paused. You can still screen this job manually.'}</p>${btn}</div>`;
   if (sc.status !== 'ok') return `<div class="screen"><p class="sum">Screening failed: ${esc(sc.summary || '')}</p>${btn}</div>`;
   const ev = (sc.evidence || []).map(e => `<li>${esc(e)}</li>`).join('');
@@ -76,10 +77,9 @@ function groupKey(r) {
 }
 function renderSrcTabs() {
   const counts = {}; rows.forEach(r => { const v = r.job.via || 'hiringcafe'; counts[v] = (counts[v] || 0) + 1; });
-  const present = [...SRC_ORDER.filter(v => counts[v]), ...Object.keys(counts).filter(v => !SRC_ORDER.includes(v))];
+  const present = [...SRC_ORDER, ...Object.keys(counts).filter(v => !SRC_ORDER.includes(v))];
   $('#srcTabs').innerHTML = `<button data-src="all" class="${srcFilter === 'all' ? 'on' : ''}">All sources <span class="badge">${rows.length}</span></button>` +
-    present.map(v => `<button data-src="${esc(v)}" class="${srcFilter === v ? 'on' : ''}">${esc(VIA_LABEL[v] || v)} <span class="badge">${counts[v]}</span></button>`).join('');
-  if (srcFilter !== 'all' && !counts[srcFilter]) srcFilter = 'all';
+    present.map(v => `<button data-src="${esc(v)}" class="${srcFilter === v ? 'on' : ''}" title="Jobs first found in the selected time window">${esc(VIA_LABEL[v] || v)} <span class="badge">${counts[v] || 0}</span></button>`).join('');
 }
 // Keep per-job choices while filtering or refreshing the list; save them with the application.
 const launchDrafts = new Map();
@@ -115,7 +115,7 @@ function rowHtml(r) {
   return `<div class="job" data-id="${esc(r.id)}">
       <div class="row">
         <div class="title"><span class="chev" aria-hidden="true">&#9654;</span><a href="${esc(link)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(j.title)}</a>
-          ${j.visa_sponsorship ? '<span class="badge ok">visa</span>' : ''}${isRecent(r.first_seen) ? '<span class="badge warn">new</span>' : ''}${(srcFilter === 'all') ? `<span class="badge" title="found via ${esc(j.via || 'hiringcafe')}">${esc(VIA_LABEL[j.via] || 'hiring.cafe')}</span>` : ''}${spBadge(r.screening)}${badge(r.app_status)}</div>
+          ${j.visa_sponsorship ? '<span class="badge ok">visa</span>' : ''}${isRecent(r.first_seen) ? '<span class="badge warn">new</span>' : ''}${(srcFilter === 'all') ? `<span class="badge" title="found via ${esc(j.via || 'hiringcafe')}">${esc(VIA_LABEL[j.via] || 'hiring.cafe')}</span>` : ''}${r.filter_reason ? `<span class="badge warn" title="${esc(r.filter_reason)}">Rule exclusion: ${esc(r.filter_reason)}</span>` : ''}${spBadge(r.screening)}${badge(r.app_status)}</div>
         <div class="muted" title="${esc(j.company)}">${esc(j.company)}</div>
         <div class="muted" title="${esc(j.location)}">${esc(j.location || '')}</div>
         <div class="found" title="found ${esc(fmt(r.first_seen))} · posted ${esc(fmt(j.published_at))}">found ${localTime(r.first_seen)}<small>posted ${esc((j.published_at || '').slice(0, 10))}</small></div>
@@ -139,8 +139,9 @@ function render() {
   // Posting time is only day-accurate for most sources and "found" seconds differ per scan,
   // so sorting on either to the second scatters a company's postings; day granularity keeps them together.
   const postedDay = r => (r.job.published_at || '').slice(0, 10);
-  const hideUnlikely = $('#hideUnlikely').checked;
+  const hideUnlikely = $('#hideUnlikely').checked, matchingOnly = $('#matchingOnly').checked;
   const shown = rows.filter(r => srcFilter === 'all' || (r.job.via || 'hiringcafe') === srcFilter)
+                    .filter(r => !matchingOnly || !r.filter_reason)
                     .filter(r => !hideUnlikely || !(r.screening && r.screening.status === 'ok' && (r.screening.verdict === 'unlikely' || r.screening.new_grad_fit === 0)))
                     .filter(r => !q || [r.title, r.company, r.location].join(' ').toLowerCase().includes(q))
                     .sort((a, b) => localDay(b.first_seen).localeCompare(localDay(a.first_seen))
@@ -149,7 +150,15 @@ function render() {
                                  || (a.job.title || '').localeCompare(b.job.title || '')
                                  || (a.job.location || '').localeCompare(b.job.location || ''));
   $('#count').textContent = `${shown.length} job${shown.length === 1 ? '' : 's'}` + (srcFilter !== 'all' || q ? ` (of ${rows.length})` : '');
-  if (!shown.length) { $('#list').innerHTML = '<div class="empty">Nothing here. Run <code>jobfilter run</code> to fetch.</div>'; return; }
+  if (!shown.length) {
+    const source = srcFilter === 'all' ? '' : `${VIA_LABEL[srcFilter] || srcFilter} `;
+    const windowLabel = mode === '24h' ? 'in the last 24 hours' : mode === '72h' ? 'in the last 3 days' : mode === 'date' ? `on ${$('#date').value}` : 'across all dates';
+    $('#list').innerHTML = `<div class="empty">No ${esc(source)}jobs match ${esc(windowLabel)}${q || hideUnlikely || matchingOnly ? ' and your current filters' : ''}.
+      <p>Dates refer to when this app first found a job. Seeing it again in a scan does not make it new.</p>
+      ${mode !== 'all' ? '<button class="btn" data-act="all-dates">View all dates</button>' : ''}
+      ${q || hideUnlikely || matchingOnly ? '<p>Try clearing the search or turning off the rule and screening filters.</p>' : ''}</div>`;
+    return;
+  }
   const groups = new Map();
   for (const r of shown) { const k = groupKey(r); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); }
   const withRuns = list => list.map((r, i) => {
@@ -184,9 +193,11 @@ $('#srcTabs').addEventListener('click', e => {
 });
 try { srcFilter = localStorage.getItem('jf.src') || 'all'; } catch (_) {}
 $('#q').addEventListener('input', render);
+$('#matchingOnly').addEventListener('change', render);
 $('#hideUnlikely').addEventListener('change', () => { try { localStorage.setItem('jf.hideUnlikely', $('#hideUnlikely').checked ? '1' : ''); } catch (_) {} render(); });
 try { $('#hideUnlikely').checked = localStorage.getItem('jf.hideUnlikely') === '1'; } catch (_) {}
 $('#list').addEventListener('click', async e => {
+  if (e.target.closest('[data-act="all-dates"]')) { $('#mode button[data-mode="all"]').click(); return; }
   const job = e.target.closest('.job'); if (!job) return;
   const act = e.target.closest('[data-act]');
   if (act) {

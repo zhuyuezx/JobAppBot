@@ -1,4 +1,4 @@
-"""SQLite collection of every job that passed the rules, deduped across runs."""
+"""SQLite collection of fetched jobs and their rule exclusions, deduped across runs."""
 from __future__ import annotations
 
 import json
@@ -127,6 +127,9 @@ class Store:
     def _migrate(self) -> None:
         """Add columns introduced after the first release and backfill them."""
         cols = {r[1] for r in self.conn.execute("PRAGMA table_info(jobs)")}
+        if "filter_reason" not in cols:
+            self.conn.execute("ALTER TABLE jobs ADD COLUMN filter_reason TEXT")
+            self.conn.commit()
         added = False
         for col, ddl in (("via", "TEXT NOT NULL DEFAULT 'hiringcafe'"), ("norm_url", "TEXT"), ("norm_key", "TEXT")):
             if col not in cols:
@@ -168,24 +171,32 @@ class Store:
                 LEGACY_CODEX))
 
     # ----- writes --------------------------------------------------------
-    def upsert_many(self, jobs: list[Job], run_id: str) -> list[Job]:
+    def upsert_many(self, jobs: list[Job], run_id: str,
+                    rejection_reasons: Optional[dict[str, str]] = None) -> list[Job]:
         """Insert unseen jobs, touch seen ones. Returns the jobs that were new."""
         now = utc_now()
         now_iso = now.isoformat(timespec="seconds")
         local_date = now.astimezone().strftime("%Y-%m-%d")
         new: list[Job] = []
         cur = self.conn.cursor()
+        matched_rows: set[str] = set()
         for job in jobs:
+            reason = (rejection_reasons or {}).get(job.id)
             nurl, nkey = job.norm_url(), job.norm_key()
-            # same posting seen before: by id, by hiring.cafe's dedup cluster, by apply URL, or (only across
+            # same posting seen before: by id, by cluster when neither has an apply URL, by apply URL, or (only across
             # sources; within one source the id is authoritative) by company+title+location
             row = cur.execute(
-                "SELECT id FROM jobs WHERE id = ? OR dedup_key = ? OR (norm_url IS NOT NULL AND norm_url = ?) "
+                "SELECT id, filter_reason FROM jobs WHERE id = ? OR (dedup_key = ? AND norm_url IS NULL AND ? IS NULL) OR (norm_url IS NOT NULL AND norm_url = ?) "
                 "OR (norm_key = ? AND norm_key != '' AND via != ?)",
-                (job.id, job.dedup_key, nurl, nkey, job.via)).fetchone()
+                (job.id, job.dedup_key, nurl, nurl, nkey, job.via)).fetchone()
             if row:
+                if not reason:
+                    matched_rows.add(row["id"])
+                if row["id"] in matched_rows or (row["id"] != job.id and not row["filter_reason"]):
+                    reason = None
                 cur.execute("UPDATE jobs SET last_seen = ?, seen_count = seen_count + 1 WHERE id = ?",
                             (now_iso, row["id"]))
+                cur.execute("UPDATE jobs SET filter_reason=? WHERE id=?", (reason, row["id"]))
                 continue
             cur.execute(
                 """INSERT INTO jobs (id, dedup_key, first_seen, first_seen_date, last_seen, first_run_id,
@@ -199,6 +210,9 @@ class Store:
                  job.via, nurl, nkey, json.dumps(job.to_dict())),
             )
             new.append(job)
+            cur.execute("UPDATE jobs SET filter_reason=? WHERE id=?", (reason, job.id))
+            if not reason:
+                matched_rows.add(job.id)
         self.conn.commit()
         return new
 
@@ -278,7 +292,7 @@ class Store:
         return out
 
     def unscreened(self, limit: int = 50, since_hours: Optional[float] = None) -> list[dict[str, Any]]:
-        sql = "SELECT j.* FROM jobs j LEFT JOIN screenings s ON s.job_id = j.id WHERE s.job_id IS NULL"
+        sql = "SELECT j.* FROM jobs j LEFT JOIN screenings s ON s.job_id = j.id WHERE s.job_id IS NULL AND j.filter_reason IS NULL"
         params: list[Any] = []
         if since_hours is not None:
             sql += " AND j.first_seen >= ?"

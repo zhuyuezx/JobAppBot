@@ -16,10 +16,10 @@
     <button data-tab="settings">AI settings</button>
   </div>
   <div id="jobsControls" style="display:contents">
-    <div class="seg" id="mode">
-      <button data-mode="24h" class="on">Last 24h</button>
-      <button data-mode="72h">Last 3 days</button>
-      <button data-mode="date">By date</button>
+    <div class="seg" id="mode" title="When this app first found the job, not when the source last refreshed it">
+      <button data-mode="24h" class="on">Found last 24h</button>
+      <button data-mode="72h">Found last 3 days</button>
+      <button data-mode="date">By found date</button>
       <button data-mode="all">All</button>
     </div>
     <select id="date" hidden></select>
@@ -27,6 +27,7 @@
       <button data-src="all" class="on">All sources</button>
     </div>
     <input id="q" type="search" placeholder="filter title / company / location">
+    <label class="chk" title="Show only postings that pass your configured country, category, title, experience and clearance rules"><input type="checkbox" id="matchingOnly"> matching rules only</label>
     <label class="chk" title="hide jobs the screening marked as unlikely to sponsor or not new-grad level"><input type="checkbox" id="hideUnlikely"> hide unlikely / not new-grad</label>
   </div>
   <span class="count" id="count"></span>

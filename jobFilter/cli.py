@@ -109,11 +109,14 @@ def cmd_run(args) -> int:
     if not args.no_store:
         from jobFilter.store import Store
         store = Store(DB_PATH)
-        new = store.upsert_many(kept, run_id)
+        excluded = [(job, reason) for job, reason in rejected if reason != "duplicate in batch"]
+        new = store.upsert_many(kept + [job for job, _ in excluded], run_id,
+                                rejection_reasons={job.id: reason for job, reason in excluded})
         store.record_run(run_id, search_state, len(jobs), len(kept), len(new))
-        log(f"{len(new)} new (db now {store.count()} jobs)")
+        log(f"{len(new)} new (db now {store.count()} jobs); rule-excluded postings are saved with reasons")
         if args.new_only:
-            to_print = new
+            kept_ids = {job.id for job in kept}
+            to_print = [job for job in new if job.id in kept_ids]
         # Post-fetch screening of the new jobs (sponsorship + fit) with a small model.
         from jobFilter import screen
         scfg = screen.screening_config(cfg)

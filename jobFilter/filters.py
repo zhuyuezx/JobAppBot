@@ -71,12 +71,13 @@ def apply_rules(jobs: list[Job], rules: dict[str, Any]) -> tuple[list[Job], list
     """Split jobs into (kept, [(job, reason), ...]). Also dedups within the batch."""
     kept: list[Job] = []
     rejected: list[tuple[Job, str]] = []
-    seen: set[str] = set()
+    seen: set[tuple[str, str]] = set()
     for job in jobs:
-        if job.dedup_key in seen:
+        identity = (job.via, job.id)
+        if identity in seen:
             rejected.append((job, "duplicate in batch"))
             continue
-        seen.add(job.dedup_key)
+        seen.add(identity)
         reason = next((r for rule in RULES if (r := rule(job, rules))), None)
         if reason:
             rejected.append((job, reason))

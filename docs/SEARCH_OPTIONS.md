@@ -117,3 +117,14 @@ Each hit's `v5_processed_job_data` includes `job_category`,
 `workplace_countries`, `formatted_workplace_location`, `estimated_publish_date`,
 `yearly_min_compensation` / `yearly_max_compensation`, `technical_tools`,
 `requirements_summary`. Local `rules` in the config filter on these.
+
+
+### Visibility of rule-excluded postings
+
+Scans save fetched postings even when local rules exclude them. The dashboard shows
+the exclusion reason and includes these postings by default; **matching rules only**
+hides them. Existing date and screening filters still apply. Automatic AI screening
+selects only jobs that pass local rules, while manual screening remains available.
+The daily workbook includes a **Rule exclusion** column. Distinct application URLs
+are preserved even when HiringCafe assigns them the same duplicate-group ID.
+Earlier discarded postings reappear when a subsequent scan fetches them again.
