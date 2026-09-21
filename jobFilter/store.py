@@ -307,6 +307,27 @@ class Store:
         self.conn.commit()
 
     # ----- applications --------------------------------------------------
+    def application_launch_defaults(self, defaults: dict[str, Any]) -> dict[str, Any]:
+        """Preselect the last launch choices, keeping each provider's own model.
+
+        Use creation order: retrying or updating an old application must not
+        replace the choices from a more recently started application.
+        """
+        result = dict(defaults)
+        latest = []
+        for engine, keys in ((CLAUDE, ("model",)), (CODEX, ("codex_model", "codex_reasoning_effort"))):
+            row = self.conn.execute(
+                "SELECT engine, settings_json, created_at, rowid FROM applications "
+                "WHERE engine=? AND settings_json IS NOT NULL AND settings_json != 'null' "
+                "ORDER BY created_at DESC, rowid DESC LIMIT 1", (engine,)).fetchone()
+            if row:
+                settings = json.loads(row["settings_json"])
+                result.update({key: settings[key] for key in keys if key in settings})
+                latest.append(row)
+        if latest:
+            result["engine"] = max(latest, key=lambda r: (r["created_at"], r["rowid"]))["engine"]
+        return result
+
     def queue_application(self, job_id: str, engine: str = CLAUDE, settings: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         validate_engine(engine)
         existing = self.get_application(job_id)

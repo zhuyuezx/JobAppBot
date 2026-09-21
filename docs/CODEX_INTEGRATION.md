@@ -8,6 +8,10 @@ implicitly accepting Codex's default. If no models appear, run Codex once while 
 in to refresh its catalog and reload this page.
 
 The selected settings are saved with the application and shown in Applications.
+After you click **Prepare application**, the next job preselects the last-used provider,
+model and thinking level, including after a page reload or server restart. Switching
+providers restores that provider’s last-used model (and GPT thinking level).
+Unsubmitted dropdown edits and failed queue requests do not change the remembered choices.
 Retries and question continuation keep those choices, even if global defaults change.
 Existing applications created before this update retain their previous settings behavior.
 **AI settings → Application defaults** remains an optional place to set initial choices.
@@ -18,7 +22,8 @@ Existing applications created before this update retain their previous settings 
 | ChatGPT / Codex (`codex-playwright`) | Managed Playwright MCP bridge; dedicated Chrome profile | Prepare with GPT |
 
 Screening is selected independently under **AI settings → Job screening**.
-Changing defaults affects new applications only. Existing applications retain their
+Saved defaults are used until a provider has application history; afterwards, the
+job controls preselect its last-used choices. Change those controls to choose differently. Existing applications retain their
 provider and session; use **Run again** to resume them. Claude remains the default
 on a fresh install. Its CLI command, Chrome integration and resume flow are unchanged.
 
@@ -113,7 +118,7 @@ Token usage is not a dollar cost, so Codex results do not invent a USD charge.
 ## GPT thinking level
 
 Choose **Thinking level** on the job before starting an application. In **AI settings**,
-set defaults for future applications or choose the independent screening level: **Model default**, **Low**, **Medium**, **High**, or **Extra high**.
+set initial application defaults or choose the independent screening level: **Model default**, **Low**, **Medium**, **High**, or **Extra high**.
 Save that section to apply the choice to the next run. Existing configurations use
 Model default. The optional model name is a separate advanced override; it is not
 a thinking-level field. Supported effort levels depend on the selected model.

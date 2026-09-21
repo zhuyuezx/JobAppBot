@@ -83,6 +83,7 @@ def make_handler(store: Store, config_path: Path | None = None):
                     self._json(store.runs())
                 elif p == "/api/engine":
                     st = apply_engine.engine_status()
+                    st["launch_settings"] = store.application_launch_defaults(st["settings"])
                     st["counts"] = store.application_counts()
                     st["open_questions"] = len(store.questions(status="open"))
                     self._json(st)
@@ -154,7 +155,7 @@ def make_handler(store: Store, config_path: Path | None = None):
                 elif p == "/api/applications/queue":
                     if not store.get(b.get("job_id", "")):
                         return self._json({"error": "unknown job"}, 404)
-                    defaults = apply_engine.effective_settings()
+                    defaults = store.application_launch_defaults(apply_engine.effective_settings())
                     app = store.queue_application(b["job_id"], b.get("engine", defaults["engine"]),
                                                   {**defaults, **b.get("settings", {})})
                     apply_engine.start_worker(store.path)

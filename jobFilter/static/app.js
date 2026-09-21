@@ -91,12 +91,12 @@ function launchChoice(id) {
 }
 function launchControls(id) {
   const choice = launchChoice(id), gpt = choice.engine === 'codex-playwright';
-  const models = gpt ? launchModels : ['opus', 'sonnet', 'haiku'];
+  const models = [...new Set([...(gpt ? launchModels : ['opus', 'sonnet', 'haiku']), ...(choice.model ? [choice.model] : [])])];
   return `<div class="launch-options settings-fields" data-launch-id="${esc(id)}">
     <label>Application provider<select data-run-engine><option value="claude-chrome" ${!gpt ? 'selected' : ''}>Claude Code</option><option value="codex-playwright" ${gpt ? 'selected' : ''}>ChatGPT / Codex</option></select></label>
     <label>Application model<select data-run-model><option value="">Choose a model</option>${models.map(m => `<option value="${esc(m)}" ${choice.model === m ? 'selected' : ''}>${esc(m)}</option>`).join('')}</select></label>
     ${gpt ? `<label>Thinking level<select data-run-effort>${[['','Model default'],['low','Low'],['medium','Medium'],['high','High'],['xhigh','Extra high']].map(([v,label]) => `<option value="${v}" ${choice.effort === v ? 'selected' : ''}>${label}</option>`).join('')}</select></label>` : ''}
-    <span class="muted">These choices apply only to this application.</span>
+    <span class="muted">Your last-used choices are preselected. Starting an application remembers these choices for next time.</span>
   </div>`;
 }
 $('#list').addEventListener('change', e => {
@@ -105,6 +105,7 @@ $('#list').addEventListener('change', e => {
   if (e.target.matches('[data-run-engine]')) {
     choice.engine = e.target.value;
     choice.model = choice.engine === 'codex-playwright' ? (launchDefaults.codex_model || 'gpt-5.6-luna') : (launchDefaults.model || 'opus');
+    choice.effort = launchDefaults.codex_reasoning_effort || '';
   } else { choice.model = box.querySelector('[data-run-model]').value; choice.effort = box.querySelector('[data-run-effort]')?.value || ''; }
   launchDrafts.set(id, choice);
   if (e.target.matches('[data-run-engine]')) box.outerHTML = launchControls(id);
@@ -203,7 +204,9 @@ $('#list').addEventListener('click', async e => {
       const settings = engine === 'codex-playwright' ? {codex_model: model, codex_reasoning_effort: box.querySelector('[data-run-effort]').value} : {model};
       act.disabled = true; act.textContent = 'Queued...';
       const r = await api('/api/applications/queue', { job_id: job.dataset.id, engine, settings });
-      if (r.error) alert(r.error);
+      if (r.error) { alert(r.error); act.disabled = false; act.textContent = 'Prepare application'; return; }
+      launchDrafts.delete(job.dataset.id);
+      await refreshProviders();
       await load(); $('#tabs button[data-tab=apps]').click();
     } else if (act.dataset.act === 'goapps') { $('#tabs button[data-tab=apps]').click(); }
     return;
@@ -220,16 +223,17 @@ const ATTENTION_STATUSES = ['review_ready', 'needs_answer', 'needs_login', 'capt
 function updateAttention(count) { $('#appsBadge').hidden = !count; $('#appsBadge').textContent = count; }
 const providerName = engine => ({'codex-playwright': 'ChatGPT / Codex', 'codex': 'ChatGPT / Codex'}[engine] || 'Claude Code');
 function engineBanner(st) {
-  applicationEngine = st.settings.engine;
-  $('#engine').innerHTML = `<span>New applications: <strong>${providerName(applicationEngine)}</strong></span><a href="#settings">Change AI provider</a>`;
+  applicationEngine = (st.launch_settings || st.settings).engine;
+  $('#engine').innerHTML = `<span>Next application: <strong>${providerName(applicationEngine)}</strong> · remembers your last-used choices</span><a href="#settings">AI settings</a>`;
 
 }
 async function refreshProviders() {
   try {
     const [st, sc] = await Promise.all([api('/api/engine'), api('/api/screening-settings')]);
     if (st.error) throw new Error(st.error);
-    applicationEngine = st.settings.engine;
-    launchDefaults = st.settings; launchModels = st.codex_models || [];
+    launchDefaults = st.launch_settings || st.settings;
+    applicationEngine = launchDefaults.engine;
+    launchModels = st.codex_models || [];
     updateAttention(ATTENTION_STATUSES.reduce((n, status) => n + (st.counts[status] || 0), 0));
     if (sc.settings) { screeningProvider = sc.settings.provider; screeningEnabled = sc.settings.enabled; }
     const screening = sc.settings ? (sc.settings.enabled ? providerName(sc.settings.provider) : 'Paused') : 'Unavailable';
@@ -249,7 +253,7 @@ function thinkingSelect(id, selected = '') {
 function settingMessage(id, text, error = false) { const el = $(id); el.textContent = text; el.classList.toggle('error', error); }
 function renderApplicationSettings(st) {
   const saved = st.settings, selected = saved.engine === 'codex-playwright' ? 'codex' : 'claude';
-  $('#applicationSettings').innerHTML = `<h2>Application defaults</h2><p class="help">Saved provider: <strong id="savedAppProvider">${providerName(saved.engine)}</strong>. Override provider, model and thinking level beside any job before preparing it. Existing applications keep their saved choices.</p>
+  $('#applicationSettings').innerHTML = `<h2>Application defaults</h2><p class="help">Saved provider: <strong id="savedAppProvider">${providerName(saved.engine)}</strong>. Job controls remember your last-used provider, model and thinking level; these defaults apply before your first use. Existing applications keep their saved choices.</p>
     ${providerCards('applicationProvider', selected, true)}
     <div id="applicationGuide"></div>
     <div id="claudeSettings" class="settings-fields"><label>Claude model<input id="modelInp" type="text" value="${esc(saved.model)}" list="claudeModels"><datalist id="claudeModels">${st.model_choices.map(m => `<option value="${esc(m)}">`).join('')}</datalist></label><label>Maximum turns<input id="turnsInp" type="text" inputmode="numeric" value="${saved.max_turns}"></label></div>

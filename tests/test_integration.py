@@ -400,6 +400,39 @@ class IntegrationTests(unittest.TestCase):
                 self.store.queue_application('new', 'codex-playwright', settings)
             self.assertIsNone(self.store.get_application('new'))
 
+    def test_last_launch_choices_persist_and_remember_each_provider(self):
+        defaults = profile.load_settings()
+        self.assertEqual(self.store.application_launch_defaults(defaults), defaults)
+        with patch('jobFilter.store._iso', return_value='2026-09-21T00:00:00+00:00'):
+            first = self.store.queue_application('test', 'codex-playwright',
+                {'codex_model': 'gpt-5.6-luna', 'codex_reasoning_effort': 'medium'})
+            add_job(self.store, 'claude', 'https://example.com/claude')
+            self.store.queue_application('claude', 'claude-chrome', {'model': 'haiku'})
+        self.store.update_application('test', status='failed')
+        self.store.queue_application('test', 'codex-playwright')
+        reopened = Store(self.store.path)
+        try:
+            remembered = reopened.application_launch_defaults(defaults)
+        finally:
+            reopened.close()
+        self.assertEqual(remembered['engine'], 'claude-chrome')
+        self.assertEqual(remembered['model'], 'haiku')
+        self.assertEqual(remembered['codex_model'], 'gpt-5.6-luna')
+        self.assertEqual(remembered['codex_reasoning_effort'], 'medium')
+        self.assertEqual(profile.load_settings(), defaults)
+        self.assertEqual(self.store.get_application('test')['settings'], first['settings'])
+
+    def test_invalid_launch_does_not_replace_last_choices(self):
+        self.store.queue_application('test', 'codex-playwright',
+            {'codex_model': 'gpt-5.6-terra', 'codex_reasoning_effort': ''})
+        defaults = {**profile.load_settings(), 'codex_reasoning_effort': 'high'}
+        before = self.store.application_launch_defaults(defaults)
+        add_job(self.store, 'new', 'https://example.com/new')
+        with self.assertRaises(ValueError):
+            self.store.queue_application('new', 'codex-playwright', {'codex_reasoning_effort': 'invalid'})
+        self.assertEqual(self.store.application_launch_defaults(defaults), before)
+        self.assertEqual(before['codex_reasoning_effort'], '')
+
     def test_claude_uses_per_application_model(self):
         app = self.store.queue_application('test', 'claude-chrome', {'model': 'haiku'})
         event = {'type': 'result', 'structured_output': result(), 'session_id': 'session'}
