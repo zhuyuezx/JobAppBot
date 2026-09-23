@@ -16,10 +16,10 @@
     <button data-tab="settings">AI settings</button>
   </div>
   <div id="jobsControls" style="display:contents">
-    <div class="seg" id="mode" title="When this app first found the job, not when the source last refreshed it">
-      <button data-mode="24h" class="on">Found last 24h</button>
-      <button data-mode="72h">Found last 3 days</button>
-      <button data-mode="date">By found date</button>
+    <div class="seg" id="mode">
+      <button data-mode="24h" class="on">Last 24h</button>
+      <button data-mode="72h">Last 3 days</button>
+      <button data-mode="date">By date</button>
       <button data-mode="all">All</button>
     </div>
     <select id="date" hidden></select>
@@ -27,7 +27,6 @@
       <button data-src="all" class="on">All sources</button>
     </div>
     <input id="q" type="search" placeholder="filter title / company / location">
-    <label class="chk" title="Show only postings that pass your configured country, category, title, experience and clearance rules"><input type="checkbox" id="matchingOnly"> matching rules only</label>
     <label class="chk" title="hide jobs the screening marked as unlikely to sponsor or not new-grad level"><input type="checkbox" id="hideUnlikely"> hide unlikely / not new-grad</label>
   </div>
   <span class="count" id="count"></span>
@@ -41,7 +40,7 @@
       <option value="updated">Recently updated</option>
       <option value="attention">Needs attention first</option>
       <option value="company">Company · A–Z</option>
-    </select></label></div>
+    </select></label><label class="chk"><input type="checkbox" id="unfinishedOnly"> Unfinished only</label></div>
     <div id="engine" class="provider-summary"></div>
     <div id="apps"></div>
   </section>
@@ -71,6 +70,16 @@
     </div>
   </section>
 </main>
+<aside id="applicationActivity" class="application-activity" aria-label="Application activity" hidden>
+  <section id="activityDetails" class="activity-details" aria-label="Active applications" hidden>
+    <div class="activity-heading"><strong>Application activity</strong><button class="btn" id="closeActivity" aria-label="Close application activity">✕</button></div>
+    <div id="activityItems"></div>
+  </section>
+  <button id="activityToggle" class="activity-toggle" aria-expanded="false" aria-controls="activityDetails">
+    <span id="activitySpinner" class="activity-spinner" aria-hidden="true"></span>
+    <span id="activityLabel" role="status" aria-live="polite"></span>
+  </button>
+</aside>
 
 <script src="/static/app.js"></script>
 </body>

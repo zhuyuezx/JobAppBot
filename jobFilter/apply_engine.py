@@ -272,6 +272,9 @@ def _store_screenshot(reported: Optional[str], work_dir: Path) -> Optional[str]:
 
 def requeue_if_answered(store: Store, job_id: str) -> bool:
     """After the user answers questions: queue the job again when nothing is open."""
+    app = store.get_application(job_id)
+    if not app or app["status"] != "needs_answer":
+        return False
     if store.questions(job_id=job_id, status="open"):
         return False
     store.update_application(job_id, status="queued")

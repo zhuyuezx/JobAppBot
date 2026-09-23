@@ -59,6 +59,19 @@ Review the form in the automation Chrome window and submit it yourself, then mar
 application submitted in jobFilter. The runner is instructed never to submit; this is
 an agent instruction, not a technical block on every website's submit controls.
 
+If you applied outside the tool, expand the job in **Jobs** and click **Mark submitted**.
+This records it in Applications as **Manually tracked**, with the time you marked it,
+without starting automation. You can also mark a paused or failed application submitted
+from Applications; queued or running attempts must finish first. **Unfinished only**
+hides submitted, already-applied, and skipped entries. Marking a paused application
+submitted closes its outstanding questions and preserves its provider and history.
+
+Working applications stay at the top of Applications and expand automatically when
+they start; queued applications follow them. Your selected sort applies within each
+group. The bottom-right activity indicator shows the running/queued count on every
+tab. Click it for job details and **View application** to jump to an expanded record.
+It refreshes automatically and disappears when no applications are running or queued.
+
 The local bridge listens only on `127.0.0.1:8931`. It stays alive after individual Codex
 runs and UI restarts so prepared tabs remain available. If Chrome or the bridge is
 closed, sign-ins persist on disk but unsaved form state may be lost; retry the job.

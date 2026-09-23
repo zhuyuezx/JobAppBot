@@ -22,7 +22,6 @@ function spBadge(sc) {
 function screenBlock(r) {
   const sc = r.screening;
   const btn = `<button class="btn" data-act="screen">${sc ? 'Screen again' : 'Screen now'} · ${screeningProvider === 'codex' ? 'GPT' : 'Claude'}</button>`;
-  if (!sc && r.filter_reason) return `<div class="screen"><p class="sum">Excluded by your rules: <strong>${esc(r.filter_reason)}</strong>. Automatic screening is skipped; you can still review or screen this posting manually.</p>${btn}</div>`;
   if (!sc) return `<div class="screen"><p class="sum muted" style="white-space:normal">Not screened yet. ${screeningEnabled ? 'New jobs are screened automatically after each hourly scan.' : 'Automatic screening is paused. You can still screen this job manually.'}</p>${btn}</div>`;
   if (sc.status !== 'ok') return `<div class="screen"><p class="sum">Screening failed: ${esc(sc.summary || '')}</p>${btn}</div>`;
   const ev = (sc.evidence || []).map(e => `<li>${esc(e)}</li>`).join('');
@@ -47,7 +46,7 @@ $('#tabs').addEventListener('click', e => {
   ['jobs', 'apps', 'profile', 'settings'].forEach(t => $('#tab-' + t).hidden = t !== tab);
   $('#jobsControls').style.display = tab === 'jobs' ? 'contents' : 'none';
   $('#count').textContent = '';
-  if (tab === 'jobs') { load(); refreshProviders(); } if (tab === 'apps') loadApps(); if (tab === 'profile') loadProfile(); if (tab === 'settings') loadSettings();
+  if (tab === 'jobs') { load(); refreshProviders(); } loadApps(); if (tab === 'profile') loadProfile(); if (tab === 'settings') loadSettings();
 });
 
 // ---------------- jobs ----------------
@@ -77,9 +76,10 @@ function groupKey(r) {
 }
 function renderSrcTabs() {
   const counts = {}; rows.forEach(r => { const v = r.job.via || 'hiringcafe'; counts[v] = (counts[v] || 0) + 1; });
-  const present = [...SRC_ORDER, ...Object.keys(counts).filter(v => !SRC_ORDER.includes(v))];
+  const present = [...SRC_ORDER.filter(v => counts[v]), ...Object.keys(counts).filter(v => !SRC_ORDER.includes(v))];
   $('#srcTabs').innerHTML = `<button data-src="all" class="${srcFilter === 'all' ? 'on' : ''}">All sources <span class="badge">${rows.length}</span></button>` +
-    present.map(v => `<button data-src="${esc(v)}" class="${srcFilter === v ? 'on' : ''}" title="Jobs first found in the selected time window">${esc(VIA_LABEL[v] || v)} <span class="badge">${counts[v] || 0}</span></button>`).join('');
+    present.map(v => `<button data-src="${esc(v)}" class="${srcFilter === v ? 'on' : ''}">${esc(VIA_LABEL[v] || v)} <span class="badge">${counts[v]}</span></button>`).join('');
+  if (srcFilter !== 'all' && !counts[srcFilter]) srcFilter = 'all';
 }
 // Keep per-job choices while filtering or refreshing the list; save them with the application.
 const launchDrafts = new Map();
@@ -115,7 +115,7 @@ function rowHtml(r) {
   return `<div class="job" data-id="${esc(r.id)}">
       <div class="row">
         <div class="title"><span class="chev" aria-hidden="true">&#9654;</span><a href="${esc(link)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(j.title)}</a>
-          ${j.visa_sponsorship ? '<span class="badge ok">visa</span>' : ''}${isRecent(r.first_seen) ? '<span class="badge warn">new</span>' : ''}${(srcFilter === 'all') ? `<span class="badge" title="found via ${esc(j.via || 'hiringcafe')}">${esc(VIA_LABEL[j.via] || 'hiring.cafe')}</span>` : ''}${r.filter_reason ? `<span class="badge warn" title="${esc(r.filter_reason)}">Rule exclusion: ${esc(r.filter_reason)}</span>` : ''}${spBadge(r.screening)}${badge(r.app_status)}</div>
+          ${j.visa_sponsorship ? '<span class="badge ok">visa</span>' : ''}${isRecent(r.first_seen) ? '<span class="badge warn">new</span>' : ''}${(srcFilter === 'all') ? `<span class="badge" title="found via ${esc(j.via || 'hiringcafe')}">${esc(VIA_LABEL[j.via] || 'hiring.cafe')}</span>` : ''}${spBadge(r.screening)}${badge(r.app_status)}</div>
         <div class="muted" title="${esc(j.company)}">${esc(j.company)}</div>
         <div class="muted" title="${esc(j.location)}">${esc(j.location || '')}</div>
         <div class="found" title="found ${esc(fmt(r.first_seen))} · posted ${esc(fmt(j.published_at))}">found ${localTime(r.first_seen)}<small>posted ${esc((j.published_at || '').slice(0, 10))}</small></div>
@@ -126,6 +126,7 @@ function rowHtml(r) {
         ${!r.app_status ? launchControls(r.id) : ''}
         <div class="actions">
           ${r.app_status ? `<button class="btn" data-act="goapps">Open in Applications</button>` : `<button class="btn primary" data-act="prepare">Prepare application</button>`}
+          ${!['submitted','queued','running'].includes(r.app_status) ? '<button class="btn" data-act="mark-submitted" title="Record an application you submitted yourself; does not start automation">Mark submitted</button>' : ''}
           ${j.apply_url ? `<a class="btn" href="${esc(j.apply_url)}" target="_blank" rel="noopener">Apply page</a>` : ''}
           <a class="btn" href="${esc(r.hc_url)}" target="_blank" rel="noopener">${esc(VIA_LABEL[j.via] || 'hiring.cafe')}</a>
         </div>
@@ -139,9 +140,8 @@ function render() {
   // Posting time is only day-accurate for most sources and "found" seconds differ per scan,
   // so sorting on either to the second scatters a company's postings; day granularity keeps them together.
   const postedDay = r => (r.job.published_at || '').slice(0, 10);
-  const hideUnlikely = $('#hideUnlikely').checked, matchingOnly = $('#matchingOnly').checked;
+  const hideUnlikely = $('#hideUnlikely').checked;
   const shown = rows.filter(r => srcFilter === 'all' || (r.job.via || 'hiringcafe') === srcFilter)
-                    .filter(r => !matchingOnly || !r.filter_reason)
                     .filter(r => !hideUnlikely || !(r.screening && r.screening.status === 'ok' && (r.screening.verdict === 'unlikely' || r.screening.new_grad_fit === 0)))
                     .filter(r => !q || [r.title, r.company, r.location].join(' ').toLowerCase().includes(q))
                     .sort((a, b) => localDay(b.first_seen).localeCompare(localDay(a.first_seen))
@@ -150,15 +150,7 @@ function render() {
                                  || (a.job.title || '').localeCompare(b.job.title || '')
                                  || (a.job.location || '').localeCompare(b.job.location || ''));
   $('#count').textContent = `${shown.length} job${shown.length === 1 ? '' : 's'}` + (srcFilter !== 'all' || q ? ` (of ${rows.length})` : '');
-  if (!shown.length) {
-    const source = srcFilter === 'all' ? '' : `${VIA_LABEL[srcFilter] || srcFilter} `;
-    const windowLabel = mode === '24h' ? 'in the last 24 hours' : mode === '72h' ? 'in the last 3 days' : mode === 'date' ? `on ${$('#date').value}` : 'across all dates';
-    $('#list').innerHTML = `<div class="empty">No ${esc(source)}jobs match ${esc(windowLabel)}${q || hideUnlikely || matchingOnly ? ' and your current filters' : ''}.
-      <p>Dates refer to when this app first found a job. Seeing it again in a scan does not make it new.</p>
-      ${mode !== 'all' ? '<button class="btn" data-act="all-dates">View all dates</button>' : ''}
-      ${q || hideUnlikely || matchingOnly ? '<p>Try clearing the search or turning off the rule and screening filters.</p>' : ''}</div>`;
-    return;
-  }
+  if (!shown.length) { $('#list').innerHTML = '<div class="empty">Nothing here. Run <code>jobfilter run</code> to fetch.</div>'; return; }
   const groups = new Map();
   for (const r of shown) { const k = groupKey(r); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); }
   const withRuns = list => list.map((r, i) => {
@@ -172,7 +164,7 @@ async function load() {
   let path = '/api/jobs';
   if (mode === '24h') path += '?since=24'; else if (mode === '72h') path += '?since=72';
   else if (mode === 'date') path += '?date=' + encodeURIComponent($('#date').value || '');
-  rows = await api(path); render();
+  rows = (await api(path)).filter(r => !r.filter_reason); render();
 }
 async function loadDates() {
   const dates = await api('/api/dates');
@@ -193,11 +185,9 @@ $('#srcTabs').addEventListener('click', e => {
 });
 try { srcFilter = localStorage.getItem('jf.src') || 'all'; } catch (_) {}
 $('#q').addEventListener('input', render);
-$('#matchingOnly').addEventListener('change', render);
 $('#hideUnlikely').addEventListener('change', () => { try { localStorage.setItem('jf.hideUnlikely', $('#hideUnlikely').checked ? '1' : ''); } catch (_) {} render(); });
 try { $('#hideUnlikely').checked = localStorage.getItem('jf.hideUnlikely') === '1'; } catch (_) {}
 $('#list').addEventListener('click', async e => {
-  if (e.target.closest('[data-act="all-dates"]')) { $('#mode button[data-mode="all"]').click(); return; }
   const job = e.target.closest('.job'); if (!job) return;
   const act = e.target.closest('[data-act]');
   if (act) {
@@ -207,7 +197,16 @@ $('#list').addEventListener('click', async e => {
       const poll = async (n) => { await new Promise(res => setTimeout(res, 5000)); await load(); const row = rows.find(x => x.id === job.dataset.id); if (row && row.screening && n < 24) { /* done */ } else if (n < 24) poll(n + 1); };
       poll(0); return;
     }
-    if (act.dataset.act === 'prepare') {
+    if (act.dataset.act === 'mark-submitted') {
+      act.disabled = true;
+      try {
+        const r = await api('/api/applications/status', {job_id: job.dataset.id, status: 'submitted'});
+        if (r.error) throw new Error(r.error);
+        await load();
+        await refreshProviders();
+      } catch (err) { alert('Could not mark submitted: ' + err.message); }
+      finally { act.disabled = false; }
+    } else if (act.dataset.act === 'prepare') {
       const box = job.querySelector('[data-launch-id]');
       const engine = box.querySelector('[data-run-engine]').value;
       const model = box.querySelector('[data-run-model]').value;
@@ -228,11 +227,58 @@ $('#list').addEventListener('click', async e => {
 });
 
 // ---------------- applications ----------------
-let apps = [], openApp = null, appsTimer = null;
+let apps = [], appsTimer = null, appsRequest = 0, previousRunning = new Set();
+const expandedApps = new Set(), applicationDrafts = new Map();
+const activeApplication = a => ['running', 'queued'].includes(a.status);
+const activePriority = a => a.status === 'running' ? 0 : a.status === 'queued' ? 1 : 2;
 let applicationEngine = 'claude-chrome', screeningProvider = 'claude', screeningEnabled = true;
 const ATTENTION_STATUSES = ['review_ready', 'needs_answer', 'needs_login', 'captcha'];
 function updateAttention(count) { $('#appsBadge').hidden = !count; $('#appsBadge').textContent = count; }
-const providerName = engine => ({'codex-playwright': 'ChatGPT / Codex', 'codex': 'ChatGPT / Codex'}[engine] || 'Claude Code');
+const providerName = engine => ({'manual': 'Manually tracked', 'codex-playwright': 'ChatGPT / Codex', 'codex': 'ChatGPT / Codex'}[engine] || 'Claude Code');
+function setActivityOpen(open) {
+  $('#activityDetails').hidden = !open;
+  $('#activityToggle').setAttribute('aria-expanded', String(open));
+}
+function renderActivity(unavailable = false) {
+  const active = apps.filter(activeApplication).sort((a, b) => activePriority(a) - activePriority(b));
+  $('#applicationActivity').hidden = !active.length && !unavailable;
+  $('#activitySpinner').classList.toggle('idle', unavailable || !active.some(a => a.status === 'running'));
+  const label = unavailable ? 'Application status unavailable' : `${active.length} active application${active.length === 1 ? '' : 's'}`;
+  $('#activityToggle').setAttribute('aria-label', label);
+  if ($('#activityLabel').textContent !== label) $('#activityLabel').textContent = label;
+  $('#activityItems').innerHTML = (unavailable ? '<p>Could not refresh status. Retrying automatically…</p>' : '') + active.map(a => `<div class="activity-item">
+    <strong>${esc(a.job.title)}</strong>${badge(a.status)}
+    <p>${esc(a.job.company)} · ${providerName(a.engine)}</p>
+    ${a.summary ? `<p>${esc(a.summary)}</p>` : ''}
+    <small>${a.status === 'queued' ? 'Waiting to start' : 'Attempt ' + a.attempts} · updated ${fmt(a.updated_at)}</small>
+    <button class="btn" data-activity-id="${esc(a.job_id)}">View application</button>
+  </div>`).join('');
+  if (!active.length && !unavailable) setActivityOpen(false);
+}
+$('#activityToggle').addEventListener('click', () => setActivityOpen($('#activityDetails').hidden));
+$('#closeActivity').addEventListener('click', () => { setActivityOpen(false); $('#activityToggle').focus(); });
+$('#applicationActivity').addEventListener('keydown', e => {
+  if (e.key === 'Escape') { setActivityOpen(false); $('#activityToggle').focus(); }
+});
+$('#activityItems').addEventListener('click', async e => {
+  const button = e.target.closest('[data-activity-id]'); if (!button) return;
+  const id = button.dataset.activityId;
+  expandedApps.add(id);
+  setActivityOpen(false);
+  $('#tabs button[data-tab="apps"]').click();
+  await loadApps();
+  const row = [...document.querySelectorAll('#apps .app')].find(el => el.dataset.id === id);
+  row?.scrollIntoView({block: 'start'});
+});
+$('#apps').addEventListener('input', e => {
+  const app = e.target.closest('.app'); if (!app) return;
+  const key = e.target.matches('[data-note]') ? 'note' : e.target.matches('[data-answer]') ? e.target.closest('[data-qid]').dataset.qid : null;
+  if (key !== null) {
+    const draft = applicationDrafts.get(app.dataset.id) || {};
+    draft[key] = e.target.value;
+    applicationDrafts.set(app.dataset.id, draft);
+  }
+});
 function engineBanner(st) {
   applicationEngine = (st.launch_settings || st.settings).engine;
   $('#engine').innerHTML = `<span>Next application: <strong>${providerName(applicationEngine)}</strong> · remembers your last-used choices</span><a href="#settings">AI settings</a>`;
@@ -337,6 +383,7 @@ async function loadSettings() {
 }
 function appDetails(a) {
   const j = a.job, qs = (a.questions || []).filter(q => q.status === 'open');
+  const draft = applicationDrafts.get(a.job_id) || {};
   return `<div class="details">
     <dl class="kv">
       <dt>Status</dt><dd>${badge(a.status)} <span class="muted">attempt ${a.attempts}, updated ${fmt(a.updated_at)}</span></dd>
@@ -345,18 +392,18 @@ function appDetails(a) {
       ${a.settings ? `<dt>Model</dt><dd>${esc(a.engine === 'codex-playwright' ? a.settings.codex_model : a.settings.model)}${a.engine === 'codex-playwright' ? ' · thinking: ' + esc(a.settings.codex_reasoning_effort || 'model default') : ''}</dd>` : ''}
       <dt>Summary</dt><dd>${esc(a.summary || '')}</dd>
       ${a.page_url ? `<dt>Tab</dt><dd><a href="${esc(a.page_url)}" target="_blank" rel="noopener">${esc(a.page_url)}</a></dd>` : ''}
-      <dt>Note</dt><dd><input type="text" data-note value="${esc(a.note || '')}" placeholder="your note, saved with status changes" style="width:100%"></dd>
+      <dt>Note</dt><dd><input type="text" data-note value="${esc(draft.note ?? a.note ?? '')}" placeholder="your note, saved with status changes" style="width:100%"></dd>
     </dl>
     ${qs.length ? `<h2>Questions for you (${qs.length})</h2>` + qs.map(q => `<div class="q" data-qid="${q.id}">
         <div class="qt">${esc(q.question)}</div>
         ${q.options ? `<div class="muted" style="white-space:normal">Options: ${esc(q.options.join(' | '))}</div>` : ''}
-        <input type="text" data-answer placeholder="your answer">
+        <input type="text" data-answer placeholder="your answer" value="${esc(draft[q.id] ?? q.answer ?? '')}">
         <div class="actions"><button class="btn primary" data-act="answer">Answer &amp; save to bank</button><button class="btn" data-act="answer-once">Answer once</button></div>
       </div>`).join('') : ''}
     <div class="actions">
       ${['review_ready','needs_login','captcha'].includes(a.status) ? `<a class="btn primary" href="${esc(a.page_url || j.apply_url)}" target="_blank" rel="noopener">Open the tab and finish</a>` : ''}
-      ${['review_ready','needs_login','captcha'].includes(a.status) ? `<button class="btn" data-act="status" data-status="submitted">Mark submitted</button>` : ''}
-      ${['failed','needs_login','captcha','already_applied','skipped','submitted'].includes(a.status) ? `<button class="btn" data-act="retry">Run again</button>` : ''}
+      ${!['submitted','queued','running'].includes(a.status) ? `<button class="btn" data-act="status" data-status="submitted">Mark submitted</button>` : ''}
+      ${a.engine !== 'manual' && ['failed','needs_login','captcha','already_applied','skipped','submitted'].includes(a.status) ? `<button class="btn" data-act="retry">Run again</button>` : ''}
       ${['queued','running'].includes(a.status) ? `<button class="btn" data-act="status" data-status="skipped">Cancel</button>` : `<button class="btn" data-act="status" data-status="skipped">Skip</button>`}
       <button class="btn" data-act="refresh">Refresh</button>
     </div>
@@ -366,15 +413,18 @@ function appDetails(a) {
   </div>`;
 }
 $('#appSort').addEventListener('change', renderApps);
+$('#unfinishedOnly').addEventListener('change', renderApps);
 function renderApps() {
   const counts = {}; apps.forEach(a => counts[a.status] = (counts[a.status] || 0) + 1);
   $('#count').textContent = Object.entries(counts).map(([k, v]) => `${v} ${STATUS_LABEL[k] || k}`).join(' · ');
   updateAttention(apps.filter(a => ATTENTION_STATUSES.includes(a.status)).length);
-  if (!apps.length) { $('#apps').innerHTML = '<div class="empty">No applications yet. Open a job in Jobs and choose Prepare with Claude or Prepare with GPT.</div>'; return; }
+  if (!apps.length) { $('#apps').innerHTML = '<div class="empty">No applications yet. Open a job in Jobs to prepare an application or mark it submitted.</div>'; return; }
   const order = ['needs_answer', 'review_ready', 'needs_login', 'captcha', 'running', 'queued', 'failed', 'already_applied', 'submitted', 'skipped'];
   const sort = $('#appSort').value;
   const recent = (x, y) => (y.updated_at || '').localeCompare(x.updated_at || '') || x.job_id.localeCompare(y.job_id);
   apps.sort((x, y) => {
+    const priority = activePriority(x) - activePriority(y);
+    if (priority) return priority;
     if (sort.startsWith('submitted-')) {
       if (!!x.submitted_at !== !!y.submitted_at) return x.submitted_at ? -1 : 1;
       return (sort === 'submitted-asc' ? 1 : -1) * (x.submitted_at || '').localeCompare(y.submitted_at || '') || recent(x, y);
@@ -383,45 +433,67 @@ function renderApps() {
     if (sort === 'company') return (x.job.company || '').localeCompare(y.job.company || '') || recent(x, y);
     return recent(x, y);
   });
-  $('#apps').innerHTML = apps.map((a, rank) => `<div class="app ${openApp === a.job_id ? 'open' : ''}" data-id="${esc(a.job_id)}">
+  const visible = apps.filter(a => !$('#unfinishedOnly').checked || !['submitted','already_applied','skipped'].includes(a.status));
+  $('#apps').innerHTML = visible.map((a, rank) => `<div class="app ${expandedApps.has(a.job_id) ? 'open' : ''} ${a.status === 'running' ? 'working' : ''}" data-id="${esc(a.job_id)}">
       <div class="row">
         <div class="title"><span class="badge">#${rank + 1}</span><span class="chev" aria-hidden="true">&#9654;</span><a href="${esc(a.job.apply_url || a.hc_url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(a.job.title)}</a>${badge(a.status)}<span class="badge">${providerName(a.engine)}</span>${a.open_questions ? `<span class="badge warn">${a.open_questions} question${a.open_questions > 1 ? 's' : ''}</span>` : ''}</div>
         <div class="muted">${esc(a.job.company)}</div>
         <div class="muted">${esc(a.summary || '').slice(0, 80)}</div>
         <div class="muted">${a.submitted_at ? 'Submitted ' + fmt(a.submitted_at) + (a.submitted_at_estimated ? ' (est.)' : '') : 'Not submitted · updated ' + fmt(a.updated_at)}</div>
       </div>
-      ${openApp === a.job_id ? appDetails(a) : '<div class="details"></div>'}
-    </div>`).join('');
+      ${expandedApps.has(a.job_id) ? appDetails(a) : '<div class="details"></div>'}
+    </div>`).join('') || '<div class="empty">No unfinished applications.</div>';
 }
 async function loadApps() {
-  if (tab !== 'apps') return;
-  const [st, list] = await Promise.all([api('/api/engine'), api('/api/applications')]);
-  if (tab !== 'apps') return;
-  apps = list;
-  engineBanner(st);
-  if (openApp) { const full = await api('/api/application?id=' + encodeURIComponent(openApp)); const i = apps.findIndex(a => a.job_id === openApp); if (i >= 0 && !full.error) apps[i] = full; }
-  renderApps();
+  const request = ++appsRequest;
   clearTimeout(appsTimer);
-  if (tab === 'apps' && apps.some(a => ['queued', 'running'].includes(a.status))) appsTimer = setTimeout(loadApps, 4000);
+  try {
+    const [st, list] = await Promise.all([tab === 'apps' ? api('/api/engine') : null, api('/api/applications')]);
+    if (request !== appsRequest) return;
+    if (!Array.isArray(list)) throw new Error('Invalid application status');
+    const running = new Set(list.filter(a => a.status === 'running').map(a => a.job_id));
+    running.forEach(id => { if (!previousRunning.has(id)) expandedApps.add(id); });
+    previousRunning = running;
+    apps = list;
+    renderActivity();
+    updateAttention(apps.filter(a => ATTENTION_STATUSES.includes(a.status)).length);
+    if (tab === 'apps') {
+      if (st && !st.error) engineBanner(st);
+      const details = await Promise.all(apps.filter(a => expandedApps.has(a.job_id)).map(a => api('/api/application?id=' + encodeURIComponent(a.job_id))));
+      if (request !== appsRequest || tab !== 'apps') return;
+      for (const full of details) { const i = apps.findIndex(a => a.job_id === full.job_id); if (i >= 0 && !full.error) apps[i] = {...apps[i], ...full}; }
+      // Do not replace the focused input while the user is typing.
+      if (!document.activeElement?.matches('#apps input, #apps textarea')) renderApps();
+    }
+  } catch (err) {
+    if (request === appsRequest) renderActivity(true);
+  } finally {
+    if (request === appsRequest) appsTimer = setTimeout(loadApps, apps.some(activeApplication) ? 4000 : 15000);
+  }
 }
 $('#apps').addEventListener('click', async e => {
   const el = e.target.closest('.app'); if (!el) return;
   const id = el.dataset.id, act = e.target.closest('[data-act]');
   if (act) {
     const kind = act.dataset.act;
-    if (kind === 'status') await api('/api/applications/status', { job_id: id, status: act.dataset.status, note: el.querySelector('[data-note]')?.value || '' });
+    if (kind === 'status') {
+      const r = await api('/api/applications/status', { job_id: id, status: act.dataset.status, note: el.querySelector('[data-note]')?.value || '' });
+      if (r.error) { alert(r.error); return; }
+    }
     else if (kind === 'retry') await api('/api/applications/retry', { job_id: id });
     else if (kind === 'answer' || kind === 'answer-once') {
       const qel = act.closest('.q'); const ans = qel.querySelector('[data-answer]').value.trim();
       if (!ans) return;
       const r = await api('/api/questions/answer', { id: Number(qel.dataset.qid), answer: ans, save: kind === 'answer' });
+      if (r.error) { alert(r.error); return; }
+      const draft = applicationDrafts.get(id); if (draft) delete draft[qel.dataset.qid];
       if (r.requeued) $('#count').textContent = 'All answered. The application will continue automatically.';
     }
     await loadApps(); return;
   }
   if (e.target.closest('a') || e.target.closest('input') || e.target.closest('textarea')) return;
   if (!e.target.closest('.row')) return;          // only the header bar toggles; the details area is inert
-  openApp = openApp === id ? null : id;
+  if (expandedApps.has(id)) expandedApps.delete(id); else expandedApps.add(id);
   await loadApps();
 });
 
@@ -453,4 +525,5 @@ $('#answers').addEventListener('click', async e => {
 function showTab(name) { const b = document.querySelector(`#tabs button[data-tab="${name}"]`); if (b) b.click(); }
 window.addEventListener('hashchange', () => showTab(location.hash.slice(1) || 'jobs'));
 refreshProviders();
+loadApps();
 loadDates().then(load).then(() => { if (location.hash && location.hash !== '#jobs') showTab(location.hash.slice(1)); });

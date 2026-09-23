@@ -364,6 +364,26 @@ class Store:
         self.conn.commit()
         return self.get_application(job_id)
 
+    def mark_submitted(self, job_id: str, note: Optional[str] = None) -> dict[str, Any]:
+        """Record an external submission without queuing an application worker."""
+        with self.conn:
+            self.conn.execute("BEGIN IMMEDIATE")
+            if not self.get(job_id):
+                raise ValueError("Unknown job")
+            current = self.get_application(job_id)
+            if current and current["status"] in ("queued", "running"):
+                raise ValueError("Wait for the active application attempt to finish before marking submitted.")
+            now = _iso()
+            self.conn.execute(
+                """INSERT INTO applications (job_id, status, engine, created_at, updated_at, submitted_at, note, summary)
+                   VALUES (?, 'submitted', 'manual', ?, ?, ?, ?, 'Marked submitted manually.')
+                   ON CONFLICT(job_id) DO UPDATE SET status='submitted', updated_at=excluded.updated_at,
+                   submitted_at=COALESCE(applications.submitted_at, excluded.submitted_at),
+                   note=COALESCE(excluded.note, applications.note)""",
+                (job_id, now, now, now, note))
+            self.conn.execute("UPDATE questions SET status='superseded' WHERE job_id=? AND status='open'", (job_id,))
+        return self.get_application(job_id)
+
     def update_application(self, job_id: str, **fields: Any) -> None:
         if "status" in fields and fields["status"] not in APP_STATUSES:
             raise ValueError(f"bad status {fields['status']}")

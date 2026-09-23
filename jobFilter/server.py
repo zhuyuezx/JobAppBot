@@ -163,6 +163,10 @@ def make_handler(store: Store, config_path: Path | None = None):
                 elif p == "/api/applications/status":
                     if b.get("status") not in APP_STATUSES:
                         return self._json({"error": f"status must be one of {APP_STATUSES}"}, 400)
+                    if b["status"] == "submitted":
+                        return self._json(store.mark_submitted(b["job_id"], b.get("note")))
+                    if not store.get_application(b["job_id"]):
+                        return self._json({"error": "unknown application"}, 404)
                     fields = {"status": b["status"]}
                     if "note" in b:
                         fields["note"] = b["note"]
@@ -172,6 +176,8 @@ def make_handler(store: Store, config_path: Path | None = None):
                     app = store.get_application(b["job_id"])
                     if not app or app["status"] == "running":
                         return self._json({"error": "Application missing or still running"}, 400)
+                    if app["engine"] == "manual":
+                        return self._json({"error": "This application was tracked manually and has no automated session to resume."}, 400)
                     store.update_application(b["job_id"], status="queued")
                     apply_engine.start_worker(store.path)
                     self._json(store.get_application(b["job_id"]))

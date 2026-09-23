@@ -82,3 +82,19 @@
   .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
   table { border-collapse:collapse; width:100%; } td, th { text-align:left; padding:6px; border-bottom:1px solid var(--line); vertical-align:top; } th { color:var(--muted); font-weight:500; }
   @media (max-width: 800px) { .row { grid-template-columns: 1fr; gap:2px; } .kv, .grid2 { grid-template-columns: 1fr; } }
+  .app.working { border-left:3px solid var(--accent); padding-left:10px; }
+  .app { scroll-margin-top:120px; }
+  .settings-fields label.chk { flex-direction:row; align-self:center; }
+  .application-activity { position:fixed; right:20px; bottom:20px; z-index:5; width:min(360px, calc(100vw - 32px)); display:flex; flex-direction:column; align-items:flex-end; gap:10px; }
+  .activity-toggle { display:flex; align-items:center; gap:10px; border:1px solid var(--accent); border-radius:999px; padding:12px 18px; background:var(--bg); color:var(--fg); font:inherit; font-weight:600; cursor:pointer; box-shadow:0 4px 20px #0002; }
+  .activity-spinner { width:16px; height:16px; border:2px solid var(--line); border-top-color:var(--accent); border-radius:50%; animation:activity-spin .8s linear infinite; flex-shrink:0; }
+  .activity-spinner.idle { animation:none; border-color:var(--muted); }
+  .activity-details { width:100%; max-height:min(440px, 65vh); overflow:auto; border:1px solid var(--line); border-radius:12px; background:var(--bg); box-shadow:0 8px 30px #0003; padding:14px; }
+  .activity-heading { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+  .activity-item { border-top:1px solid var(--line); padding:12px 0; margin-top:10px; overflow-wrap:anywhere; }
+  .activity-item p { margin:5px 0; color:var(--muted); }
+  .activity-item .btn { margin-top:6px; }
+  .activity-item small { display:block; color:var(--muted); margin-top:4px; }
+  body:has(.application-activity:not([hidden])) main { padding-bottom:100px; }
+  @keyframes activity-spin { to { transform:rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .activity-spinner { animation:none; } }

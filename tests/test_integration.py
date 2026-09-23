@@ -106,6 +106,51 @@ class IntegrationTests(unittest.TestCase):
             self.assertEqual(path.read_text(), before)
         self.assertEqual(screen.save_screening_settings(path, {"provider": "claude"})["model"], "haiku")
 
+    def test_manual_submission_never_queues_or_changes_launch_defaults(self):
+        defaults = profile.load_settings()
+        with patch('jobFilter.store._iso', return_value='2026-09-22T12:00:00+00:00'):
+            app = self.store.mark_submitted('test', 'Applied on employer website')
+        self.assertEqual(app['status'], 'submitted')
+        self.assertEqual(app['engine'], 'manual')
+        self.assertEqual(app['attempts'], 0)
+        self.assertIsNone(app['settings'])
+        self.assertIsNone(self.store.next_queued())
+        self.assertEqual(self.store.application_launch_defaults(defaults), defaults)
+        repeated = self.store.mark_submitted('test')
+        self.assertEqual(repeated['submitted_at'], '2026-09-22T12:00:00+00:00')
+        self.assertEqual(repeated['note'], 'Applied on employer website')
+        reopened = Store(self.store.path)
+        try:
+            self.assertEqual(reopened.list_applications()[0]['status'], 'submitted')
+        finally:
+            reopened.close()
+
+    def test_manual_submission_closes_paused_questions_for_both_providers(self):
+        for engine in ('claude-chrome', 'codex-playwright'):
+            add_job(self.store, engine, 'https://example.com/' + engine)
+            before = self.store.queue_application(engine, engine, {'codex_model': 'gpt-5.6-luna'})
+            self.store.update_application(engine, status='needs_answer', session_id='preserved-session')
+            question = self.store.add_question(engine, 'Start date?')
+            app = self.store.mark_submitted(engine)
+            self.assertEqual(app['engine'], engine)
+            self.assertEqual(app['settings'], before['settings'])
+            self.assertEqual(app['session_id'], 'preserved-session')
+            self.assertEqual(self.store.questions(job_id=engine, status='open'), [])
+            # A stale question form must not restart an already submitted job.
+            self.store.answer_question(question, 'Tomorrow')
+            self.assertFalse(apply_engine.requeue_if_answered(self.store, engine))
+            self.assertEqual(self.store.get_application(engine)['status'], 'submitted')
+
+    def test_manual_submission_rejects_unknown_or_active_jobs(self):
+        with self.assertRaisesRegex(ValueError, 'Unknown job'):
+            self.store.mark_submitted('missing')
+        self.store.queue_application('test')
+        for status in ('queued', 'running'):
+            self.store.update_application('test', status=status)
+            with self.assertRaisesRegex(ValueError, 'active application'):
+                self.store.mark_submitted('test')
+            self.assertEqual(self.store.get_application('test')['status'], status)
+
     def test_queues_are_separate_and_engine_cannot_change(self):
         app = self.store.queue_application("test", "codex-playwright")
         self.assertIsNone(self.store.next_queued("claude-chrome"))
