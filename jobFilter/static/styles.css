@@ -98,3 +98,21 @@
   body:has(.application-activity:not([hidden])) main { padding-bottom:100px; }
   @keyframes activity-spin { to { transform:rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .activity-spinner { animation:none; } }
+  .job > .row, .app > .row { grid-template-columns:minmax(220px, 1fr) 150px 180px 120px auto; }
+  .row-actions { display:flex; gap:5px; align-self:center; }
+  .icon-btn { width:30px; height:30px; padding:5px; display:inline-flex; align-items:center; justify-content:center; }
+  .icon-btn svg { width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
+  .icon-btn:hover { border-color:var(--accent); color:var(--accent); }
+  .icon-btn.is-unsuitable { color:var(--badfg); background:var(--bad); }
+  .icon-btn.is-submitted { color:var(--okfg); background:var(--ok); border-color:var(--okfg); opacity:1; }
+  .icon-action { position:relative; display:inline-flex; }
+  .icon-hint { visibility:hidden; position:absolute; right:0; top:calc(100% + 7px); z-index:6; width:max-content; max-width:min(260px, calc(100vw - 40px)); padding:7px 10px; border:1px solid var(--line); border-radius:7px; background:var(--fg); color:var(--bg); box-shadow:0 3px 12px #0003; font-size:12px; font-weight:400; white-space:normal; pointer-events:none; }
+  .icon-action:hover .icon-hint, .icon-action:focus-within .icon-hint { visibility:visible; }
+  .application-tags { padding:0 6px 8px; }
+  #jobTagDialog { width:min(560px, calc(100vw - 32px)); max-height:85vh; overflow:auto; padding:22px; border:1px solid var(--line); border-radius:14px; background:var(--bg); color:var(--fg); }
+  #jobTagDialog::backdrop { background:#0008; }
+  #jobTagDialog h2 { margin:0; font-size:18px; }
+  .tag-fields { display:grid; gap:14px; }
+  .tag-fields label { display:flex; flex-direction:column; gap:5px; }
+  #tagError { color:var(--badfg); }
+  @media (max-width:1000px) { .job > .row, .app > .row { grid-template-columns:1fr; gap:5px; } .row-actions { justify-self:end; } }

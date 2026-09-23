@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from jobFilter.models import Job
+from jobFilter.suitability import assess, validate_changes
 from jobFilter.providers import APPLICATION_ENGINES, CLAUDE, CODEX, LEGACY_CODEX, validate_engine
 
 SCHEMA = """
@@ -127,6 +128,9 @@ class Store:
     def _migrate(self) -> None:
         """Add columns introduced after the first release and backfill them."""
         cols = {r[1] for r in self.conn.execute("PRAGMA table_info(jobs)")}
+        if "review_json" not in cols:
+            self.conn.execute("ALTER TABLE jobs ADD COLUMN review_json TEXT")
+            self.conn.commit()
         if "filter_reason" not in cols:
             self.conn.execute("ALTER TABLE jobs ADD COLUMN filter_reason TEXT")
             self.conn.commit()
@@ -243,6 +247,7 @@ class Store:
         screens = self.screening_map([r["id"] for r in rows]) if rows else {}
         for r in rows:
             r["screening"] = screens.get(r["id"])
+            r["review"] = assess(r)
         return rows
 
     def dates(self) -> list[dict[str, Any]]:
@@ -253,7 +258,24 @@ class Store:
 
     def get(self, job_id: str) -> Optional[dict[str, Any]]:
         row = self.conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
-        return self._row(row) if row else None
+        if not row:
+            return None
+        result = self._row(row)
+        result["screening"] = self.screening_map([job_id]).get(job_id)
+        result["review"] = assess(result)
+        return result
+
+    def save_job_review(self, job_id: str, changes: dict) -> dict:
+        validate_changes(changes)
+        row = self.get(job_id)
+        if not row:
+            raise ValueError("Unknown job")
+        saved = {**row["review_overrides"], **changes}
+        if "custom_tags" in saved:
+            saved["custom_tags"] = list(dict.fromkeys(t.strip() for t in saved["custom_tags"]))
+        self.conn.execute("UPDATE jobs SET review_json=? WHERE id=?", (json.dumps(saved), job_id))
+        self.conn.commit()
+        return self.get(job_id)
 
     def count(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
@@ -474,4 +496,5 @@ class Store:
     def _row(row: sqlite3.Row) -> dict[str, Any]:
         d = dict(row)
         d["job"] = json.loads(d.pop("job_json"))
+        d["review_overrides"] = json.loads(d.pop("review_json", None) or "{}")
         return d

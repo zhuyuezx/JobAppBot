@@ -19,6 +19,98 @@ function spBadge(sc) {
   return `<span class="badge sp-${esc(v)}" title="${esc(sc.summary || '')}">${esc(SP_LABEL[v] || v)}${sc.fit_score != null ? ' · fit ' + sc.fit_score : ''}</span>`
        + (sc.new_grad_fit === 0 ? '<span class="badge warn" title="the screening judged this is not a 0-1 year role">not new-grad</span>' : '');
 }
+const SUITABILITY_LABEL = {suitable:'Suitable', not_suitable:'Not suitable', needs_review:'Needs review'};
+const TAG_LABELS = {
+  new_grad: {yes:'New-grad', no:'Not new-grad', unknown:'New-grad unknown'},
+  sponsorship: {supported:'Sponsorship supported', not_supported:'No sponsorship', likely:'Sponsorship likely', unlikely:'Sponsorship unlikely', unknown:'Sponsorship unknown'},
+  citizenship: {yes:'Citizenship / clearance required', no:'No citizenship / clearance restriction', unknown:'Citizenship / clearance unknown'}
+};
+function reviewBadges(r) {
+  const v = r.review; if (!v) return spBadge(r.screening);
+  const tone = v.state === 'suitable' ? 'ok' : v.state === 'not_suitable' ? 'bad' : '';
+  return `<span class="badge ${tone}" title="${esc((v.override ? 'Manual conclusion. Automatic: ' + SUITABILITY_LABEL[v.automatic_state] + '. ' : 'Automatic: ') + v.reasons.join('; '))}">${SUITABILITY_LABEL[v.state]}${v.override ? ' · manual' : ''}</span>` +
+    ['new_grad','sponsorship', ...(v.tags.citizenship === 'yes' ? ['citizenship'] : [])].map(key => `<span class="badge" title="${Object.hasOwn(v.tag_overrides, key) ? 'Manually edited' : 'Automatic tag'}">${esc(TAG_LABELS[key][v.tags[key]])}${Object.hasOwn(v.tag_overrides, key) ? ' · edited' : ''}</span>`).join('') +
+    v.custom_tags.map(t => `<span class="badge">${esc(t)}</span>`).join('');
+}
+const ROW_ICONS = {
+  submitted:'<circle cx="12" cy="12" r="9"/><path d="m7 12 3 3 7-7"/>',
+  unsuitable:'<circle cx="12" cy="12" r="9"/><path d="m6 6 12 12"/>',
+  tags:'<path d="M3 3h8l10 10-8 8L3 11Z"/><circle cx="7.5" cy="7.5" r="1"/>'
+};
+function rowActions(r) {
+  const status = r.app_status || r.status;
+  const unsuitable = r.review?.state === 'not_suitable';
+  const icon = key => `<svg viewBox="0 0 24 24" aria-hidden="true">${ROW_ICONS[key]}</svg>`;
+  const hint = (text, button) => `<span class="icon-action">${button}<span class="icon-hint" aria-hidden="true">${esc(text)}</span></span>`;
+  const submittedText = status === 'submitted' ? 'Already submitted' : ['queued','running'].includes(status) ? 'Wait for the active attempt to finish' : 'Mark submitted';
+  const unsuitableText = unsuitable ? 'Clear not suitable → Needs review' : 'Mark not suitable';
+  return `<div class="row-actions">
+    ${hint(submittedText, `<button class="btn icon-btn ${status === 'submitted' ? 'is-submitted' : ''}" data-act="mark-submitted" aria-label="${submittedText}" ${['submitted','queued','running'].includes(status) ? 'disabled' : ''}>${icon('submitted')}</button>`)}
+    ${hint(unsuitableText, `<button class="btn icon-btn ${unsuitable ? 'is-unsuitable' : ''}" data-act="toggle-suitability" aria-pressed="${unsuitable}" aria-label="${unsuitable ? 'Clear not suitable mark' : 'Mark not suitable'}">${icon('unsuitable')}</button>`)}
+    ${hint('Manage tags and suitability', `<button class="btn icon-btn" data-act="manage-tags" aria-label="Manage tags">${icon('tags')}</button>`)}
+  </div>`;
+}
+async function refreshAfterReview() {
+  if (tab === 'jobs') await load();
+  await loadApps();
+}
+async function handleRowAction(act, id) {
+  const kind = act.dataset.act;
+  if (!['mark-submitted','toggle-suitability','manage-tags'].includes(kind)) return false;
+  act.disabled = true;
+  try {
+    if (kind === 'manage-tags') {
+      const row = await api('/api/job?id=' + encodeURIComponent(id));
+      if (row.error) throw new Error(row.error);
+      openTagEditor(row);
+    } else {
+      let result;
+      if (kind === 'mark-submitted') {
+        const note = act.closest('.app')?.querySelector('[data-note]')?.value;
+        result = await api('/api/applications/status', {job_id:id, status:'submitted', ...(note === undefined ? {} : {note})});
+      } else {
+        const row = (tab === 'jobs' ? rows : apps).find(r => (r.id || r.job_id) === id);
+        result = await api('/api/jobs/review', {job_id:id, conclusion:row?.review?.state === 'not_suitable' ? 'needs_review' : 'not_suitable'});
+      }
+      if (result.error) throw new Error(result.error);
+      await refreshAfterReview();
+    }
+  } catch (err) { alert('Could not update job: ' + err.message); }
+  finally { act.disabled = false; }
+  return true;
+}
+const TAG_FIELDS = {new_grad:'#tagNewGrad', sponsorship:'#tagSponsorship', citizenship:'#tagCitizenship'};
+function openTagEditor(row) {
+  const v = row.review;
+  $('#tagJobId').value = row.id;
+  $('#tagJobTitle').textContent = `${row.job.company} · ${row.job.title}`;
+  $('#tagAutomatic').textContent = `Current automatic conclusion: ${SUITABILITY_LABEL[v.automatic_state]}. ${v.reasons.join('; ')}.`;
+  $('#tagConclusion').value = v.override || '';
+  for (const [key, selector] of Object.entries(TAG_FIELDS)) {
+    $(selector).innerHTML = `<option value="">Automatic (${esc(TAG_LABELS[key][v.auto_tags[key]])})</option>` + Object.entries(TAG_LABELS[key]).map(([value, label]) => `<option value="${value}">${label}</option>`).join('');
+    $(selector).value = v.tag_overrides[key] || '';
+  }
+  $('#tagCustom').value = v.custom_tags.join(', ');
+  $('#tagError').textContent = '';
+  $('#jobTagDialog').showModal();
+}
+$('#closeJobTags').addEventListener('click', () => $('#jobTagDialog').close());
+$('#resetJobTags').addEventListener('click', () => {
+  $('#tagConclusion').value = '';
+  Object.values(TAG_FIELDS).forEach(selector => $(selector).value = '');
+});
+$('#jobTagForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const button = $('#saveJobTags'); button.disabled = true;
+  try {
+    const tags = Object.fromEntries(Object.entries(TAG_FIELDS).filter(([,selector]) => $(selector).value).map(([key,selector]) => [key,$(selector).value]));
+    const r = await api('/api/jobs/review', {job_id:$('#tagJobId').value, conclusion:$('#tagConclusion').value || null, tags, custom_tags:$('#tagCustom').value.split(',').map(t => t.trim()).filter(Boolean)});
+    if (r.error) throw new Error(r.error);
+    $('#jobTagDialog').close();
+    await refreshAfterReview();
+  } catch (err) { $('#tagError').textContent = err.message; }
+  finally { button.disabled = false; }
+});
 function screenBlock(r) {
   const sc = r.screening;
   const btn = `<button class="btn" data-act="screen">${sc ? 'Screen again' : 'Screen now'} · ${screeningProvider === 'codex' ? 'GPT' : 'Claude'}</button>`;
@@ -27,6 +119,7 @@ function screenBlock(r) {
   const ev = (sc.evidence || []).map(e => `<li>${esc(e)}</li>`).join('');
   const src = (sc.sources || []).map(u => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(u.replace(/^https?:\/\//, '').split('/')[0])}</a>`).join('');
   return `<div class="screen">
+    <p class="muted">Original screening evidence · manual tag edits are shown above</p>
     <p class="sum">${spBadge(sc)} ${esc(sc.summary || '')}</p>
     <div class="muted" style="white-space:normal">posting says: <b>${esc(sc.statement || '?')}</b>${sc.requires_citizenship ? ' · requires citizenship/clearance' : ''}${sc.new_grad_fit === 0 ? ' · not a new-grad role' : ''} · ${esc(sc.model || '')} · ${fmt(sc.screened_at)}</div>
     ${ev ? `<ul>${ev}</ul>` : ''}
@@ -115,10 +208,11 @@ function rowHtml(r) {
   return `<div class="job" data-id="${esc(r.id)}">
       <div class="row">
         <div class="title"><span class="chev" aria-hidden="true">&#9654;</span><a href="${esc(link)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(j.title)}</a>
-          ${j.visa_sponsorship ? '<span class="badge ok">visa</span>' : ''}${isRecent(r.first_seen) ? '<span class="badge warn">new</span>' : ''}${(srcFilter === 'all') ? `<span class="badge" title="found via ${esc(j.via || 'hiringcafe')}">${esc(VIA_LABEL[j.via] || 'hiring.cafe')}</span>` : ''}${spBadge(r.screening)}${badge(r.app_status)}</div>
+          ${isRecent(r.first_seen) ? '<span class="badge warn">new</span>' : ''}${(srcFilter === 'all') ? `<span class="badge" title="found via ${esc(j.via || 'hiringcafe')}">${esc(VIA_LABEL[j.via] || 'hiring.cafe')}</span>` : ''}${reviewBadges(r)}${badge(r.app_status)}</div>
         <div class="muted" title="${esc(j.company)}">${esc(j.company)}</div>
         <div class="muted" title="${esc(j.location)}">${esc(j.location || '')}</div>
         <div class="found" title="found ${esc(fmt(r.first_seen))} · posted ${esc(fmt(j.published_at))}">found ${localTime(r.first_seen)}<small>posted ${esc((j.published_at || '').slice(0, 10))}</small></div>
+        ${rowActions(r)}
       </div>
       <div class="details">
         ${screenBlock(r)}
@@ -126,7 +220,6 @@ function rowHtml(r) {
         ${!r.app_status ? launchControls(r.id) : ''}
         <div class="actions">
           ${r.app_status ? `<button class="btn" data-act="goapps">Open in Applications</button>` : `<button class="btn primary" data-act="prepare">Prepare application</button>`}
-          ${!['submitted','queued','running'].includes(r.app_status) ? '<button class="btn" data-act="mark-submitted" title="Record an application you submitted yourself; does not start automation">Mark submitted</button>' : ''}
           ${j.apply_url ? `<a class="btn" href="${esc(j.apply_url)}" target="_blank" rel="noopener">Apply page</a>` : ''}
           <a class="btn" href="${esc(r.hc_url)}" target="_blank" rel="noopener">${esc(VIA_LABEL[j.via] || 'hiring.cafe')}</a>
         </div>
@@ -142,7 +235,7 @@ function render() {
   const postedDay = r => (r.job.published_at || '').slice(0, 10);
   const hideUnlikely = $('#hideUnlikely').checked;
   const shown = rows.filter(r => srcFilter === 'all' || (r.job.via || 'hiringcafe') === srcFilter)
-                    .filter(r => !hideUnlikely || !(r.screening && r.screening.status === 'ok' && (r.screening.verdict === 'unlikely' || r.screening.new_grad_fit === 0)))
+                    .filter(r => !hideUnlikely || r.review?.state !== 'not_suitable')
                     .filter(r => !q || [r.title, r.company, r.location].join(' ').toLowerCase().includes(q))
                     .sort((a, b) => localDay(b.first_seen).localeCompare(localDay(a.first_seen))
                                  || postedDay(b).localeCompare(postedDay(a))
@@ -191,22 +284,14 @@ $('#list').addEventListener('click', async e => {
   const job = e.target.closest('.job'); if (!job) return;
   const act = e.target.closest('[data-act]');
   if (act) {
+    if (await handleRowAction(act, job.dataset.id)) return;
     if (act.dataset.act === 'screen') {
       act.disabled = true; act.textContent = 'Screening... (about 30s)';
       await api('/api/screen', { job_id: job.dataset.id });
       const poll = async (n) => { await new Promise(res => setTimeout(res, 5000)); await load(); const row = rows.find(x => x.id === job.dataset.id); if (row && row.screening && n < 24) { /* done */ } else if (n < 24) poll(n + 1); };
       poll(0); return;
     }
-    if (act.dataset.act === 'mark-submitted') {
-      act.disabled = true;
-      try {
-        const r = await api('/api/applications/status', {job_id: job.dataset.id, status: 'submitted'});
-        if (r.error) throw new Error(r.error);
-        await load();
-        await refreshProviders();
-      } catch (err) { alert('Could not mark submitted: ' + err.message); }
-      finally { act.disabled = false; }
-    } else if (act.dataset.act === 'prepare') {
+    if (act.dataset.act === 'prepare') {
       const box = job.querySelector('[data-launch-id]');
       const engine = box.querySelector('[data-run-engine]').value;
       const model = box.querySelector('[data-run-model]').value;
@@ -402,7 +487,6 @@ function appDetails(a) {
       </div>`).join('') : ''}
     <div class="actions">
       ${['review_ready','needs_login','captcha'].includes(a.status) ? `<a class="btn primary" href="${esc(a.page_url || j.apply_url)}" target="_blank" rel="noopener">Open the tab and finish</a>` : ''}
-      ${!['submitted','queued','running'].includes(a.status) ? `<button class="btn" data-act="status" data-status="submitted">Mark submitted</button>` : ''}
       ${a.engine !== 'manual' && ['failed','needs_login','captcha','already_applied','skipped','submitted'].includes(a.status) ? `<button class="btn" data-act="retry">Run again</button>` : ''}
       ${['queued','running'].includes(a.status) ? `<button class="btn" data-act="status" data-status="skipped">Cancel</button>` : `<button class="btn" data-act="status" data-status="skipped">Skip</button>`}
       <button class="btn" data-act="refresh">Refresh</button>
@@ -440,7 +524,9 @@ function renderApps() {
         <div class="muted">${esc(a.job.company)}</div>
         <div class="muted">${esc(a.summary || '').slice(0, 80)}</div>
         <div class="muted">${a.submitted_at ? 'Submitted ' + fmt(a.submitted_at) + (a.submitted_at_estimated ? ' (est.)' : '') : 'Not submitted · updated ' + fmt(a.updated_at)}</div>
+        ${rowActions(a)}
       </div>
+      <div class="application-tags">${reviewBadges(a)}</div>
       ${expandedApps.has(a.job_id) ? appDetails(a) : '<div class="details"></div>'}
     </div>`).join('') || '<div class="empty">No unfinished applications.</div>';
 }
@@ -475,6 +561,7 @@ $('#apps').addEventListener('click', async e => {
   const el = e.target.closest('.app'); if (!el) return;
   const id = el.dataset.id, act = e.target.closest('[data-act]');
   if (act) {
+    if (await handleRowAction(act, id)) return;
     const kind = act.dataset.act;
     if (kind === 'status') {
       const r = await api('/api/applications/status', { job_id: id, status: act.dataset.status, note: el.querySelector('[data-note]')?.value || '' });

@@ -27,7 +27,7 @@
       <button data-src="all" class="on">All sources</button>
     </div>
     <input id="q" type="search" placeholder="filter title / company / location">
-    <label class="chk" title="hide jobs the screening marked as unlikely to sponsor or not new-grad level"><input type="checkbox" id="hideUnlikely"> hide unlikely / not new-grad</label>
+    <label class="chk" title="Hide jobs whose current suitability conclusion is Not suitable"><input type="checkbox" id="hideUnlikely"> hide not suitable</label>
   </div>
   <span class="count" id="count"></span>
 </header>
@@ -70,6 +70,24 @@
     </div>
   </section>
 </main>
+<dialog id="jobTagDialog" aria-labelledby="jobTagHeading">
+  <form id="jobTagForm">
+    <div class="activity-heading"><h2 id="jobTagHeading">Manage tags</h2><button class="btn" type="button" id="closeJobTags" aria-label="Close tag editor">✕</button></div>
+    <p id="tagJobTitle"></p>
+    <input type="hidden" id="tagJobId">
+    <p id="tagAutomatic" class="help"></p>
+    <div class="tag-fields">
+      <label>Suitability conclusion<select id="tagConclusion"><option value="">Automatic</option><option value="suitable">Suitable</option><option value="not_suitable">Not suitable</option><option value="needs_review">Needs review</option></select></label>
+      <label>New-grad fit<select id="tagNewGrad"></select></label>
+      <label>Sponsorship<select id="tagSponsorship"></select></label>
+      <label>Citizenship / clearance requirement<select id="tagCitizenship"></select></label>
+      <label>Your tags (comma-separated)<input type="text" id="tagCustom" placeholder="e.g. priority, follow up"></label>
+    </div>
+    <p class="help">Manual choices stay saved through rescans. Automatic uses the latest evidence. Tags describe suitability; they do not cancel a running application.</p>
+    <p id="tagError" role="alert"></p>
+    <div class="actions"><button class="btn primary" type="submit" id="saveJobTags">Save changes</button><button class="btn" type="button" id="resetJobTags">Use automatic conclusion &amp; tags</button></div>
+  </form>
+</dialog>
 <aside id="applicationActivity" class="application-activity" aria-label="Application activity" hidden>
   <section id="activityDetails" class="activity-details" aria-label="Active applications" hidden>
     <div class="activity-heading"><strong>Application activity</strong><button class="btn" id="closeActivity" aria-label="Close application activity">✕</button></div>

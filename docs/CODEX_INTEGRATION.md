@@ -59,12 +59,15 @@ Review the form in the automation Chrome window and submit it yourself, then mar
 application submitted in jobFilter. The runner is instructed never to submit; this is
 an agent instruction, not a technical block on every website's submit controls.
 
-If you applied outside the tool, expand the job in **Jobs** and click **Mark submitted**.
+If you applied outside the tool, click the **✓ Mark submitted** icon in the collapsed job row.
 This records it in Applications as **Manually tracked**, with the time you marked it,
 without starting automation. You can also mark a paused or failed application submitted
 from Applications; queued or running attempts must finish first. **Unfinished only**
 hides submitted, already-applied, and skipped entries. Marking a paused application
 submitted closes its outstanding questions and preserves its provider and history.
+The adjacent **⊘** and tag icons let you mark/clear **Not suitable** and edit tags
+without expanding the row. See [suitability and editable tags](JOB_REVIEW.md) for
+automatic conclusions, manual overrides, and resetting to automatic evidence.
 
 Working applications stay at the top of Applications and expand automatically when
 they start; queued applications follow them. Your selected sort applies within each

@@ -71,10 +71,8 @@ def make_handler(store: Store, config_path: Path | None = None):
                     since = q.get("since")
                     rows = store.query(since_hours=float(since) if since else None, date=q.get("date"))
                     apps = {a["job_id"]: a["status"] for a in store.list_applications()}
-                    screens = store.screening_map([r["id"] for r in rows])
                     for r in rows:
                         r["app_status"] = apps.get(r["id"])
-                        r["screening"] = screens.get(r["id"])
                     self._json(rows)
                 elif p == "/api/job":
                     row = store.get(q.get("id", ""))
@@ -94,12 +92,14 @@ def make_handler(store: Store, config_path: Path | None = None):
                         open_q[oq["job_id"]] = open_q.get(oq["job_id"], 0) + 1
                     for a in apps:
                         a["open_questions"] = open_q.get(a["job_id"], 0)
+                        a["review"] = store.get(a["job_id"])["review"]
                     self._json(apps)
                 elif p == "/api/application":
                     a = store.get_application(q.get("id", ""))
                     if not a:
                         return self._json({"error": "not found"}, 404)
                     a["questions"] = store.questions(job_id=a["job_id"])
+                    a["review"] = store.get(a["job_id"])["review"]
                     a["log"] = _tail(a.get("log_path"), 60)
                     self._json(a)
                 elif p == "/api/log":
@@ -132,7 +132,9 @@ def make_handler(store: Store, config_path: Path | None = None):
             p = urllib.parse.urlparse(self.path).path
             b = self._body()
             try:
-                if p == "/api/screen":
+                if p == "/api/jobs/review":
+                    self._json(store.save_job_review(b.get("job_id", ""), {k: v for k, v in b.items() if k != "job_id"}))
+                elif p == "/api/screen":
                     import threading
                     from jobFilter import screen
                     row = store.get(b.get("job_id", ""))
