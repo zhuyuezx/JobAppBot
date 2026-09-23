@@ -1,82 +1,65 @@
 # JobAppBot
 
-Finds new-grad software jobs every hour, checks whether each employer is likely to sponsor a visa, and lets Claude fill the application in your own Chrome. You review and click Submit.
-
-![Jobs tab](docs/ui.png)
-
-## How it works
-
-```mermaid
-flowchart LR
-    S[hiring.cafe · Simplify · startup.jobs] -->|every hour| F[Your filters]
-    F --> DB[(One job list)]
-    DB --> SC[Claude screens each job:<br/>sponsorship + fit]
-    SC --> UI[Web page + Excel]
-    UI -->|Prepare| A[Claude fills the form<br/>in your Chrome]
-    A --> YOU[You click Submit]
-```
-
-1. **Find**: three sources are searched with your filters; each job is stored once.
-2. **Screen**: a small Claude model reads the posting and looks up the company's H-1B history. Each job gets a badge: `sponsor: likely`, `unknown`, or `unlikely`, plus a fit score. Tick *hide unlikely sponsors* to see only what's worth your time.
-3. **Apply**: choose provider, model and thinking level on the job, then click *Prepare application*. It fills the form in your Chrome, asks you when it can't answer something, and stops on the review page.
-
-By default, everything runs on your Claude subscription. No API key.
-
-**ChatGPT subscription support:** Codex can screen jobs and fill applications automatically.
-Choose **AI settings → Application filling → ChatGPT / Codex**, save, then
-click **Prepare with GPT**. The managed browser bridge uses a dedicated Chrome profile;
-questions and results appear in jobFilter. See [setup and usage](docs/CODEX_INTEGRATION.md).
+Find new-grad software jobs, review sponsorship and suitability, and prepare applications with Claude Code or ChatGPT / Codex. You review the completed form and submit it yourself.
 
 ## Quick start
 
+From the project directory, with Python 3.9+ installed:
+
 ```bash
-git clone <this repo> && cd JobAppBot
 pip install -r requirements.txt
-ln -s "$PWD/bin/jobfilter" ~/bin/jobfilter        # any folder on your PATH
+mkdir -p ~/bin
+ln -s "$PWD/bin/jobfilter" ~/bin/jobfilter  # ensure ~/bin is on your PATH
 
-cp setup/search.template.json setup/search.json    # your search (default: new-grad SWE, US)
-cp setup/profile.template.json setup/profile.json  # your details for application forms
-mkdir -p setup/resume && cp ~/Downloads/Resume.pdf setup/resume/
+cp setup/search.template.json setup/search.json
+cp setup/profile.template.json setup/profile.json
+mkdir -p setup/resume
+cp ~/Downloads/Resume.pdf setup/resume/
 
-jobfilter start          # hourly scanning + screening is now on
-jobfilter ui open        # http://127.0.0.1:8765
+jobfilter start       # hourly scanning and screening
+jobfilter ui open     # http://127.0.0.1:8765
 ```
 
-To let Claude work in your browser (one time): install the [Claude in Chrome](https://chromewebstore.google.com/detail/claude/fcoeoabgfenejglbffodgkkbkcdhcgfn) extension, run `claude --chrome` once in a terminal, and fill in the **Profile** tab. The Applications tab shows a check mark for each step. macOS and Linux, Python 3.9+.
+Configure your profile and sign in to the provider you want to use:
 
-## Daily use
+- **Claude Code:** install Claude in Chrome and run `claude --chrome` once. See [application setup](docs/APPLY_AUTOMATION.md).
+- **ChatGPT / Codex:** follow the [browser bridge setup](docs/CODEX_INTEGRATION.md).
 
-| Command | What it does |
-|---|---|
-| `jobfilter ui open` | open the web page |
-| `jobfilter status` | is it running, when was the last scan, how many jobs |
-| `jobfilter run` | scan right now |
-| `jobfilter excel` | open today's Excel workbook |
-| `jobfilter stop` / `start` | pause / resume |
-| `jobfilter log` | what the last scans did |
+## Frontend workflow
 
-**On the web page**
-- *AI settings*: choose Claude or ChatGPT separately for job screening and application filling, then save each choice. Both providers start application filling automatically.
-- *Jobs*: pick a source tab or all; rows are grouped by the day they were found. Open a row to see the screening reasoning, then *Prepare with Claude* or *Prepare with GPT*.
-- *Applications*: watch Claude work, answer the questions it parks for you (they're remembered), open the tab and press Submit, mark it submitted.
-- *Profile*: edit your details and the answer bank.
+1. **Find jobs.** Browse hiring.cafe, Simplify, and startup.jobs by source or date found. Search by title, company, or location. Jobs rejected by your search rules stay hidden.
+2. **Review suitability.** Each job shows **Suitable**, **Not suitable**, or **Needs review**. Only clear blockers trigger automatic rejection; uncertain sponsorship stays **Needs review**. Turn on **hide not suitable** to narrow the list.
+3. **Prepare an application.** Expand a job, choose its provider, model, and GPT thinking level, then click **Prepare application**. Your last-used choices are remembered. Screening has its own provider setting under **AI settings**.
+4. **Track progress.** Working applications appear first and expand automatically, followed by queued jobs. The bottom-right activity box shows the active count; click it for details or to jump to an application.
+5. **Finish and record.** Answer questions in Applications, complete any login or CAPTCHA handoff, then review and submit on the employer’s site. Mark the job submitted in JobAppBot—even if you applied entirely outside the tool.
 
-When Claude hits an account sign-up (Workday and similar), it fills your email and hands over: you pick Chrome's *Use strong password*, click Create Account, then press *Run again*.
+### Quick actions on collapsed rows
 
-## Files
+Available in both **Jobs** and **Applications**, with descriptions on hover or keyboard focus:
 
-| Path | What |
-|---|---|
-| `setup/` | your search, profile, answers, resume. Not committed; only the templates are. |
-| `data/jobs.db` | every job, screening result, and application |
-| `data/excel/<date>.xlsx` | daily workbook, one sheet per source |
-| `data/apply/<job>/` | Claude's log and review screenshot per application |
-| `.claude/skills/apply-job/SKILL.md` | how Claude fills forms; it appends what it learns after each run |
+| Icon | Action |
+| --- | --- |
+| ✓ | Mark submitted. The icon turns green once recorded. |
+| ⊘ | Mark not suitable, or clear the mark to **Needs review**. |
+| Tag | Edit suitability, new-grad fit, sponsorship, citizenship/clearance requirements, and custom tags. |
 
-Tuning (search filters, which sources, screening model, jobs per scan) is all in `setup/search.json`; the template explains each key.
+Manual conclusions and tag edits survive rescans. The tag editor shows the automatic reasoning and lets you reset to automatic mode. See [suitability rules and overrides](docs/JOB_REVIEW.md).
 
----
+In **Applications**, use **Unfinished only** to hide submitted, already-applied, and skipped entries. Working and queued items stay at the top; other entries default to newest submission first. Submission time is recorded when you mark the job submitted.
 
-Technical details: [jobFilter/README.md](jobFilter/README.md). Search parameter reference: [docs/SEARCH_OPTIONS.md](docs/SEARCH_OPTIONS.md).
+**Profile** holds your details, resume status, and answer bank. **Answer once** saves an answer for that application; **Answer & save to bank** also makes it reusable.
 
-Applications can be ranked by submission time (newest first by default), oldest submission, recent activity, attention needed, or company. Submission time is recorded when you mark an application submitted; older records use their last update as an explicitly labeled estimate. Applications without a recorded submission follow submitted entries.
+## Useful commands
+
+| Command | Purpose |
+| --- | --- |
+| `jobfilter ui open` | Open the frontend |
+| `jobfilter status` | Check scheduler and scan status |
+| `jobfilter run` | Scan now |
+| `jobfilter excel` | Open today's workbook |
+| `jobfilter stop` / `start` | Pause / resume scheduled scans |
+| `jobfilter log` | Read scan logs |
+
+Search sources, filters, and screening limits are configured in `setup/search.json`. Personal setup files are ignored by Git; templates are provided. Jobs, reviews, and application history are stored in `data/jobs.db`, with exports in `data/excel/` and application logs in `data/apply/`.
+
+More: [technical reference](jobFilter/README.md) · [search options](docs/SEARCH_OPTIONS.md) · [Codex integration](docs/CODEX_INTEGRATION.md).
