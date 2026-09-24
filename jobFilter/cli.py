@@ -87,7 +87,7 @@ def cmd_run(args) -> int:
 
     from jobFilter import sources
     if args.url:  # a pasted hiring.cafe URL means "run just that search"
-        cfg["sources"] = {"hiringcafe": True, "simplify": False, "startupjobs": False}
+        cfg["sources"] = {"hiringcafe": True, "simplify": False, "startupjobs": False, "applyguy": False}
     log(f"[{run_id}] fetching from {', '.join(n for n, c in sources.sources_config(cfg).items() if c.get('enabled'))}")
     jobs, counts, errors = sources.fetch_all(cfg, search_state=search_state, max_pages=args.max_pages, log=log)
     if not jobs and errors:
@@ -167,7 +167,7 @@ def cmd_list(args) -> int:
     by_via: dict[str, list] = {}
     for r in rows:
         by_via.setdefault(r["job"].get("via") or "hiringcafe", []).append(r)
-    for via in sorted(by_via, key=lambda v: ["hiringcafe", "simplify", "startupjobs"].index(v) if v in ("hiringcafe", "simplify", "startupjobs") else 9):
+    for via in sorted(by_via, key=lambda v: ["hiringcafe", "simplify", "startupjobs", "applyguy"].index(v) if v in ("hiringcafe", "simplify", "startupjobs", "applyguy") else 9):
         print(f"\n===== {via} ({len(by_via[via])}) =====")
         for r in by_via[via]:
             j = r["job"]
@@ -305,7 +305,7 @@ def build_parser() -> argparse.ArgumentParser:
         if name == "excel":
             c.add_argument("--out", type=Path)
         else:
-            c.add_argument("--source", choices=["hiringcafe", "simplify", "startupjobs"], help="only this source")
+            c.add_argument("--source", choices=["hiringcafe", "simplify", "startupjobs", "applyguy"], help="only this source")
         c.set_defaults(func=fn)
 
     s = sub.add_parser("serve", help="local web UI")

@@ -104,6 +104,12 @@
       "_max_pages": "Pages per role per scan (about 19 cards each); paging stops early once a page is entirely older than max_age_days.",
       "max_pages": 10,
       "max_age_days": 2
+    },
+    "applyguy": {
+      "_what": "ApplyGuy/2027-New-Grad-Jobs public JSON feed. Uses direct employer links; ambiguous or foreign locations still face your country rules.",
+      "enabled": true,
+      "max_age_days": 3,
+      "_max_age_days": "Calendar days, including today. Reads the updating main branch, not a frozen commit."
     }
   },
   "screening": {

@@ -7,7 +7,7 @@ async function api(path, body) {
   const r = await fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : undefined);
   return r.json();
 }
-const VIA_LABEL = { hiringcafe: 'hiring.cafe', simplify: 'Simplify', startupjobs: 'startup.jobs' };
+const VIA_LABEL = { hiringcafe: 'hiring.cafe', simplify: 'Simplify', startupjobs: 'startup.jobs', applyguy: 'ApplyGuy' };
 const STATUS_CLASS = { queued: '', running: 'warn', review_ready: 'ok', needs_answer: 'warn', needs_login: 'warn', captcha: 'warn', already_applied: '', failed: 'bad', submitted: 'ok', skipped: '' };
 const STATUS_LABEL = { queued: 'queued', running: 'working', review_ready: 'ready to submit', needs_answer: 'needs your answer', needs_login: 'needs login / code', captcha: 'CAPTCHA', already_applied: 'already applied', failed: 'failed', submitted: 'submitted', skipped: 'skipped' };
 const badge = st => st ? `<span class="badge ${STATUS_CLASS[st] || ''}">${esc(STATUS_LABEL[st] || st)}</span>` : '';
@@ -160,7 +160,7 @@ function jobDetails(j, r) {
   </dl>`;
 }
 let srcFilter = 'all';
-const SRC_ORDER = ['hiringcafe', 'simplify', 'startupjobs'];
+const SRC_ORDER = ['hiringcafe', 'simplify', 'startupjobs', 'applyguy'];
 const localDay = iso => { const d = new Date(iso); return isNaN(d) ? '' : `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
 const localTime = iso => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); };
 function groupKey(r) {

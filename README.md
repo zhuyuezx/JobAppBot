@@ -27,7 +27,7 @@ Configure your profile and sign in to the provider you want to use:
 
 ## Frontend workflow
 
-1. **Find jobs.** Browse hiring.cafe, Simplify, and startup.jobs by source or date found. Search by title, company, or location. Jobs rejected by your search rules stay hidden.
+1. **Find jobs.** Browse hiring.cafe, Simplify, startup.jobs, and ApplyGuy by source or date found. Search by title, company, or location. Jobs rejected by your search rules stay hidden.
 2. **Review suitability.** Each job shows **Suitable**, **Not suitable**, or **Needs review**. Only clear blockers trigger automatic rejection; uncertain sponsorship stays **Needs review**. Turn on **hide not suitable** to narrow the list.
 3. **Prepare an application.** Expand a job, choose its provider, model, and GPT thinking level, then click **Prepare application**. Your last-used choices are remembered. Screening has its own provider setting under **AI settings**.
 4. **Track progress.** Working applications appear first and expand automatically, followed by queued jobs. The bottom-right activity box shows the active count; click it for details or to jump to an application.

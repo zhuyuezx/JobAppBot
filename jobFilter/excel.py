@@ -63,7 +63,7 @@ def flatten(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-VIA_LABEL = {"hiringcafe": "hiring.cafe", "simplify": "Simplify", "startupjobs": "startup.jobs"}
+VIA_LABEL = {"hiringcafe": "hiring.cafe", "simplify": "Simplify", "startupjobs": "startup.jobs", "applyguy": "ApplyGuy"}
 
 
 def _fill_sheet(ws, rows: list[dict[str, Any]]) -> None:

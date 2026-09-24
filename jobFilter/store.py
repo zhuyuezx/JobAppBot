@@ -107,7 +107,7 @@ def _iso() -> str:
     return utc_now().isoformat(timespec="seconds")
 
 
-NORM_KEY_VERSION = 2  # 1: company+title, 2: company+title+location
+NORM_KEY_VERSION = 3  # 2: company+title+location; 3: canonical employer requisition URLs
 
 APP_STATUSES = ("queued", "running", "review_ready", "needs_answer", "needs_login", "captcha",
                 "already_applied", "failed", "submitted", "skipped")
@@ -194,6 +194,11 @@ class Store:
                 "OR (norm_key = ? AND norm_key != '' AND via != ?)",
                 (job.id, job.dedup_key, nurl, nurl, nkey, job.via)).fetchone()
             if row:
+                if job.via == 'applyguy' and row['id'] != job.id:
+                    # This supplemental list has no experience/sponsorship facts;
+                    # matching it must not clear another source's rule exclusion.
+                    cur.execute("UPDATE jobs SET last_seen=?, seen_count=seen_count+1 WHERE id=?", (now_iso, row['id']))
+                    continue
                 if not reason:
                     matched_rows.add(row["id"])
                 if row["id"] in matched_rows or (row["id"] != job.id and not row["filter_reason"]):

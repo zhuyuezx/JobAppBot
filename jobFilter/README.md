@@ -7,8 +7,8 @@ Technical companion to the top-level README.
 ```mermaid
 flowchart TD
     A[setup/search.json<br/>search_state + sources + rules] --> B[sources.py<br/>fetch_all]
-    B --> B1[hiringcafe.py] & B2[Simplify listings.json] & B3[startup.jobs HTML]
-    B1 & B2 & B3 -->|Job list| D[filters.py<br/>apply_rules]
+    B --> B1[hiringcafe.py] & B2[Simplify listings.json] & B3[startup.jobs HTML] & B4[ApplyGuy JSON]
+    B1 & B2 & B3 & B4 -->|Job list| D[filters.py<br/>apply_rules]
     D -->|kept| E[store.py<br/>Store.upsert_many]
     E -->|new jobs| SC[screen.py<br/>Sonnet + WebSearch]
     SC --> E
@@ -28,6 +28,7 @@ each tagged with `via`:
 | `hiringcafe` | `fetch_hiringcafe` | the client below | |
 | `simplify` | `fetch_simplify` | `listings.json` from SimplifyJobs/New-Grad-Positions (`dev` branch), ETag-cached in `data/cache/`; filtered to `active`, chosen categories, `max_age_days` | min YoE, clearance (set to "Other" when the list says citizenship is required), workplace type |
 | `startupjobs` | `fetch_startupjobs` | HTML of `startup.jobs/roles/<slug>?page=N`; cards parsed via their `data-post-template-target` attributes; stops when a whole page is older than `max_age_days` | min YoE, clearance; country guessed from the location text |
+| `applyguy` | `applyguy.fetch_applyguy` | [ApplyGuy/2027-New-Grad-Jobs](https://github.com/ApplyGuy/2027-New-Grad-Jobs), `main/data/new-grad-jobs.json`; ETag-cached, last 3 calendar days by default; uses direct employer links | Experience and sponsorship remain unknown until screened; foreign and ambiguous locations do not bypass country rules |
 
 Category mapping for the `require_categories` rule: Simplify `Software` and
 `Software Engineering` -> `Software Development`, `AI/ML/Data` -> `Data and
@@ -155,7 +156,7 @@ config's `search_state`.
 | `GET /api/file?path=` | screenshot/log files under `data/apply` |
 
 The page supports `#jobs`, `#apps`, `#profile`, `#settings` deep links. The Jobs tab has a
-source selector (All / hiring.cafe / Simplify / startup.jobs, remembered in
+source selector (All / hiring.cafe / Simplify / startup.jobs / ApplyGuy, remembered in
 localStorage) and groups rows by `first_seen` day; `list --source X` and the
 per-source Excel sheets are the CLI/file equivalents.
 
@@ -306,3 +307,5 @@ bin/jobfilter              service control script
 docs/                      SEARCH_OPTIONS.md, design notes, screenshots
 docs/ui.png                screenshot used by the README
 ```
+
+ApplyGuy is enabled by default; set `sources.applyguy.enabled` to `false` to disable it or change `max_age_days` for a wider window. It follows the updating branch, not a pinned commit. Bare `IN`/`DE` locations without explicit US evidence stay unknown. Matching Workday requisitions, Greenhouse board variants, and Lever/Ashby application URLs share deduplication keys. Existing matches keep their source, application history, manual tags, and rule exclusions.
