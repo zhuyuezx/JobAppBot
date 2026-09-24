@@ -312,12 +312,15 @@ $('#list').addEventListener('click', async e => {
 });
 
 // ---------------- applications ----------------
-let apps = [], appsTimer = null, appsRequest = 0, previousRunning = new Set();
+let apps = [], appsTimer = null, appsRequest = 0, previousAppStatuses = new Map();
 const expandedApps = new Set(), applicationDrafts = new Map();
-const activeApplication = a => ['running', 'queued'].includes(a.status);
-const activePriority = a => a.status === 'running' ? 0 : a.status === 'queued' ? 1 : 2;
-let applicationEngine = 'claude-chrome', screeningProvider = 'claude', screeningEnabled = true;
+const workingApplication = a => ['running', 'queued'].includes(a.status);
 const ATTENTION_STATUSES = ['review_ready', 'needs_answer', 'needs_login', 'captcha'];
+const attentionApplication = a => ATTENTION_STATUSES.includes(a.status) && a.review?.state !== 'not_suitable';
+// Keep real work visible, but don't keep rejected jobs waiting for user attention.
+const activeApplication = a => workingApplication(a) || attentionApplication(a);
+const activePriority = a => a.status === 'running' ? 0 : a.status === 'queued' ? 1 : activeApplication(a) ? 2 : 3;
+let applicationEngine = 'claude-chrome', screeningProvider = 'claude', screeningEnabled = true;
 function updateAttention(count) { $('#appsBadge').hidden = !count; $('#appsBadge').textContent = count; }
 const providerName = engine => ({'manual': 'Manually tracked', 'codex-playwright': 'ChatGPT / Codex', 'codex': 'ChatGPT / Codex'}[engine] || 'Claude Code');
 function setActivityOpen(open) {
@@ -376,7 +379,7 @@ async function refreshProviders() {
     launchDefaults = st.launch_settings || st.settings;
     applicationEngine = launchDefaults.engine;
     launchModels = st.codex_models || [];
-    updateAttention(ATTENTION_STATUSES.reduce((n, status) => n + (st.counts[status] || 0), 0));
+    updateAttention(apps.filter(attentionApplication).length);
     if (sc.settings) { screeningProvider = sc.settings.provider; screeningEnabled = sc.settings.enabled; }
     const screening = sc.settings ? (sc.settings.enabled ? providerName(sc.settings.provider) : 'Paused') : 'Unavailable';
     $('#providerSummary').innerHTML = `<span>Screening: <strong>${screening}</strong></span><span>Applications: <strong>${providerName(applicationEngine)}</strong></span><a href="#settings">Change AI providers</a>`;
@@ -501,7 +504,7 @@ $('#unfinishedOnly').addEventListener('change', renderApps);
 function renderApps() {
   const counts = {}; apps.forEach(a => counts[a.status] = (counts[a.status] || 0) + 1);
   $('#count').textContent = Object.entries(counts).map(([k, v]) => `${v} ${STATUS_LABEL[k] || k}`).join(' · ');
-  updateAttention(apps.filter(a => ATTENTION_STATUSES.includes(a.status)).length);
+  updateAttention(apps.filter(attentionApplication).length);
   if (!apps.length) { $('#apps').innerHTML = '<div class="empty">No applications yet. Open a job in Jobs to prepare an application or mark it submitted.</div>'; return; }
   const order = ['needs_answer', 'review_ready', 'needs_login', 'captcha', 'running', 'queued', 'failed', 'already_applied', 'submitted', 'skipped'];
   const sort = $('#appSort').value;
@@ -537,12 +540,13 @@ async function loadApps() {
     const [st, list] = await Promise.all([tab === 'apps' ? api('/api/engine') : null, api('/api/applications')]);
     if (request !== appsRequest) return;
     if (!Array.isArray(list)) throw new Error('Invalid application status');
-    const running = new Set(list.filter(a => a.status === 'running').map(a => a.job_id));
-    running.forEach(id => { if (!previousRunning.has(id)) expandedApps.add(id); });
-    previousRunning = running;
+    list.filter(activeApplication).forEach(a => {
+      if (previousAppStatuses.get(a.job_id) !== a.status) expandedApps.add(a.job_id);
+    });
+    previousAppStatuses = new Map(list.filter(activeApplication).map(a => [a.job_id, a.status]));
     apps = list;
     renderActivity();
-    updateAttention(apps.filter(a => ATTENTION_STATUSES.includes(a.status)).length);
+    updateAttention(apps.filter(attentionApplication).length);
     if (tab === 'apps') {
       if (st && !st.error) engineBanner(st);
       const details = await Promise.all(apps.filter(a => expandedApps.has(a.job_id)).map(a => api('/api/application?id=' + encodeURIComponent(a.job_id))));
@@ -554,7 +558,7 @@ async function loadApps() {
   } catch (err) {
     if (request === appsRequest) renderActivity(true);
   } finally {
-    if (request === appsRequest) appsTimer = setTimeout(loadApps, apps.some(activeApplication) ? 4000 : 15000);
+    if (request === appsRequest) appsTimer = setTimeout(loadApps, apps.some(workingApplication) ? 4000 : 15000);
   }
 }
 $('#apps').addEventListener('click', async e => {

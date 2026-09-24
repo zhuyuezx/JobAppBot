@@ -45,9 +45,11 @@ Available in both **Jobs** and **Applications**, with descriptions on hover or k
 
 Manual conclusions and tag edits survive rescans. The tag editor shows the automatic reasoning and lets you reset to automatic mode. See [suitability rules and overrides](docs/JOB_REVIEW.md).
 
-In **Applications**, use **Unfinished only** to hide submitted, already-applied, and skipped entries. Working and queued items stay at the top; other entries default to newest submission first. Submission time is recorded when you mark the job submitted.
+In **Applications**, use **Unfinished only** to hide submitted, already-applied, and skipped entries. Working, queued, and pending applications (answers, login, CAPTCHA, or final review) stay at the top and in the activity box until submitted, already applied, skipped, or failed. Other entries default to newest submission first. Submission time is recorded when you mark the job submitted.
 
 **Profile** holds your details, resume status, and answer bank. **Answer once** saves an answer for that application; **Answer & save to bank** also makes it reusable.
+
+Pending jobs marked **Not suitable** leave the pinned group, activity box, and attention count; their application history remains available. Queued or running attempts stay visible until they stop.
 
 ## Useful commands
 
