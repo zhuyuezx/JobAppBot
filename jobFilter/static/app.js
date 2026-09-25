@@ -8,8 +8,8 @@ async function api(path, body) {
   return r.json();
 }
 const VIA_LABEL = { hiringcafe: 'hiring.cafe', simplify: 'Simplify', startupjobs: 'startup.jobs', applyguy: 'ApplyGuy' };
-const STATUS_CLASS = { queued: '', running: 'warn', review_ready: 'ok', needs_answer: 'warn', needs_login: 'warn', captcha: 'warn', already_applied: '', unavailable: '', failed: 'bad', submitted: 'ok', skipped: '' };
-const STATUS_LABEL = { queued: 'queued', running: 'working', review_ready: 'ready to submit', needs_answer: 'needs your answer', needs_login: 'needs login / code', captcha: 'CAPTCHA', already_applied: 'already applied', unavailable: 'unavailable', failed: 'failed', submitted: 'submitted', skipped: 'skipped' };
+const STATUS_CLASS = { queued: '', running: 'warn', review_ready: 'ok', needs_answer: 'warn', needs_cover_letter: 'warn', needs_login: 'warn', captcha: 'warn', already_applied: '', unavailable: '', failed: 'bad', submitted: 'ok', skipped: '' };
+const STATUS_LABEL = { queued: 'queued', running: 'working', review_ready: 'ready to submit', needs_answer: 'needs your answer', needs_cover_letter: 'writing cover letter', needs_login: 'needs login / code', captcha: 'CAPTCHA', already_applied: 'already applied', unavailable: 'unavailable', failed: 'failed', submitted: 'submitted', skipped: 'skipped' };
 const CLOSED_STATUSES = ['unavailable', 'already_applied'];
 const badge = st => st ? `<span class="badge ${STATUS_CLASS[st] || ''}">${esc(STATUS_LABEL[st] || st)}</span>` : '';
 const SP_LABEL = { likely: 'sponsor: likely', unlikely: 'sponsor: unlikely', unknown: 'sponsor: unknown' };
@@ -541,7 +541,7 @@ function renderApps() {
   $('#count').textContent = Object.entries(counts).map(([k, v]) => `${v} ${STATUS_LABEL[k] || k}`).join(' · ');
   updateAttention(apps.filter(attentionApplication).length);
   if (!apps.length) { $('#apps').innerHTML = '<div class="empty">No applications yet. Open a job in Jobs to prepare an application or mark it submitted.</div>'; return; }
-  const order = ['needs_answer', 'review_ready', 'needs_login', 'captcha', 'running', 'queued', 'failed', 'already_applied', 'unavailable', 'submitted', 'skipped'];
+  const order = ['needs_answer', 'review_ready', 'needs_login', 'captcha', 'running', 'needs_cover_letter', 'queued', 'failed', 'already_applied', 'unavailable', 'submitted', 'skipped'];
   const sort = $('#appSort').value;
   const recent = (x, y) => (y.updated_at || '').localeCompare(x.updated_at || '') || x.job_id.localeCompare(y.job_id);
   apps.sort((x, y) => {

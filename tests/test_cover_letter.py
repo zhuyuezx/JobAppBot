@@ -6,7 +6,7 @@ import time
 import unittest
 import zipfile
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import fitz
 
@@ -174,8 +174,77 @@ class CoverLetterTests(unittest.TestCase):
                 patch.object(bridge_engine, "run_codex", side_effect=fake):
             bridge_engine.run_application(store, app)
         prepare.assert_called_once()
+        self.assertFalse(prepare.call_args.kwargs["write"], "a first run never pays for a letter")
         self.assertIn('"cover_letter_path": "/tmp/Cover_Letter_Alex_Example_Acme_Corp.pdf"', seen["prompt"])
         self.assertIn("to a cover letter field (required or optional)", seen["prompt"])
+
+
+    def _store_with_job(self):
+        store = Store(self.root / "jobs.db")
+        self.addCleanup(store.close)
+        job = Job.from_hit({"objectID": "job-1"})
+        job.title, job.company, job.location, job.apply_url = "Backend Engineer", "Acme Corp", "Seattle, WA", "https://example.com/job"
+        store.upsert_many([job], "test")
+        return store
+
+    def test_claude_writes_the_letter_only_when_the_form_asks(self):
+        store, runs = self._store_with_job(), []
+        def claude(results):
+            def popen(cmd, **kwargs):
+                runs.append(cmd)
+                event = {"type": "result", "structured_output": results.pop(0), "session_id": "s1"}
+                return Mock(stdout=io.StringIO(json.dumps(event) + "\n"), returncode=0)
+            return popen
+        with patch.object(apply_engine, "find_claude", return_value="claude"), \
+                patch.object(cover_letter, "_ask", return_value=({"paragraphs": GOOD, "notes": ""}, "opus")) as ask:
+            with patch.object(apply_engine.subprocess, "Popen", side_effect=claude([DONE])):
+                self.assertEqual(apply_engine.run_application(store, store.queue_application("job-1"))["status"], "review_ready")
+            ask.assert_not_called()   # no cover letter field, no letter
+            self.assertIn("Cover letter file to upload: (not written yet", runs[0][2])
+            self.assertEqual(cover_letter.load("job-1"), {})
+
+            store.delete_application("job-1"); runs.clear()
+            with patch.object(apply_engine.subprocess, "Popen", side_effect=claude([ASKING, DONE])):
+                self.assertEqual(apply_engine.run_application(store, store.queue_application("job-1"))["status"], "review_ready")
+            ask.assert_called_once()
+            self.assertEqual(len(runs), 2)
+            self.assertNotIn("--resume", runs[0])
+            self.assertEqual(runs[1][runs[1].index("--resume") + 1], "s1", "the same session continues")
+            letter = cover_letter.load("job-1")
+            self.assertIn(f"JobAppBot wrote the cover letter for this job: {letter['path']}", runs[1][2])
+            self.assertIn("===== COVER LETTER TEXT =====\nDear Acme Corp Hiring Team,", runs[1][2])
+
+            store.delete_application("job-1"); runs.clear()   # the letter now exists and is handed over up front
+            with patch.object(apply_engine.subprocess, "Popen", side_effect=claude([ASKING])):
+                self.assertEqual(apply_engine.run_application(store, store.queue_application("job-1"))["status"], "failed")
+            self.assertEqual(len(runs), 1, "asking again after being answered does not loop")
+            self.assertIn(f"Cover letter file to upload: {letter['path']}", runs[0][2])
+            ask.assert_called_once()
+
+    def test_codex_writes_the_letter_only_when_the_form_asks(self):
+        store, prompts = self._store_with_job(), []
+        def codex(prompt, schema, *args, **kwargs):
+            prompts.append(prompt)
+            if len(prompts) == 1:
+                return ASKING, {"model": "codex/test"}
+            shot = application_state.work_directory("job-1") / (store.get_application("job-1")["session_id"] + ".png")
+            shot.write_bytes(b"screenshot")
+            return {**DONE, "screenshot_path": str(shot)}, {"model": "codex/test"}
+        app = store.queue_application("job-1", "codex-playwright", {"codex_model": "gpt-test"})
+        with patch.object(bridge, "ensure_running", return_value="http://127.0.0.1:8931/mcp"), \
+                patch.object(bridge_engine, "run_codex", side_effect=codex), \
+                patch.object(cover_letter, "_ask", return_value=({"paragraphs": GOOD, "notes": ""}, "opus")) as ask:
+            self.assertEqual(bridge_engine.run_application(store, app)["status"], "review_ready")
+        ask.assert_called_once()
+        self.assertIn('"cover_letter_status": "not written yet"', prompts[0])
+        self.assertIn('"cover_letter_status": "ready"', prompts[1])
+        self.assertIn(f'"cover_letter_path": "{cover_letter.load("job-1")["path"]}"', prompts[1])
+
+
+ASKING = {"status": "needs_cover_letter", "summary": "Optional Cover Letter upload on the Greenhouse form.",
+          "page_url": "https://example.com/job", "unanswered_questions": []}
+DONE = {"status": "review_ready", "summary": "Filled; not submitted.", "page_url": "https://example.com/job",
+        "filled_fields": ["Cover letter: Cover_Letter_Alex_Example_Acme_Corp.pdf"], "unanswered_questions": []}
 
 
 if __name__ == "__main__":

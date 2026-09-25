@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-from jobFilter import profile as prof
+from jobFilter import cover_letter, profile as prof
 from jobFilter.store import ACTIVE_STATUSES, Store
 from jobFilter.application_state import RESULT_SCHEMA, structured_result, work_directory
 from jobFilter.providers import CLAUDE, CODEX, validate_engine
@@ -129,7 +129,7 @@ JOB
 - Location: {job.get('location')}
 - Resume file to upload: {resume['path'] or '(no resume file found)'}
 - Resume version: {resume['version'].upper()} ({resume['reason']})
-- Cover letter file to upload: {letter['path'] if letter.get('status') == 'ok' else '(none: ' + (letter.get('reason') or 'not written') + ')'}
+- Cover letter file to upload: {cover_letter.task_line(letter)}
 
 At the end, return the structured result. In `lessons`, list only new reusable facts about this site's form that the SKILL does not already say (or an empty list). In `screenshot_path`, give the path returned by the screenshot tool; do not copy or convert files.
 
@@ -153,8 +153,19 @@ At the end, return the structured result. In `lessons`, list only new reusable f
 """
 
 
-def resume_message(questions: list[dict[str, Any]], work_dir: Path, after: Optional[str] = None) -> str:
+def resume_message(questions: list[dict[str, Any]], work_dir: Path, after: Optional[str] = None,
+                   letter: Optional[dict[str, Any]] = None) -> str:
     parts = []
+    if after == "needs_cover_letter" and (letter or {}).get("status") == "ok":
+        parts.append(f"JobAppBot wrote the cover letter for this job: {letter['path']}\n"
+                     "Find the application tab (tabs_context_mcp) and re-read the page. Upload this file to the cover letter "
+                     "field you stopped at, or paste the text below into a cover letter text box (keep its blank lines). "
+                     "Check that the field shows it and list it in filled_fields.\n\n"
+                     f"===== COVER LETTER TEXT =====\n{letter.get('text', '')}")
+    elif after == "needs_cover_letter":
+        parts.append(f"No cover letter could be written ({(letter or {}).get('reason') or 'unknown reason'}). Find the application "
+                     "tab and continue: leave an optional cover letter field empty; if it is required, fill everything else "
+                     "and say in the summary that the cover letter is missing. Do not stop for a cover letter again.")
     if after in ("needs_login", "captcha"):
         parts.append("The user has finished the step you stopped at (account creation / sign-in / verification code / CAPTCHA) "
                      "in the application tab. Find that tab (tabs_context_mcp), take a screenshot, re-read the page, and continue "
@@ -172,6 +183,7 @@ def resume_message(questions: list[dict[str, Any]], work_dir: Path, after: Optio
 _processes: dict[str, subprocess.Popen] = {}
 _processes_lock = threading.Lock()
 STOP_SUMMARY = "Stopped by you. Run again to retry, or delete the application."
+COVER_LETTER_SUMMARY = "The form has a cover letter field: writing a cover letter for this job, then continuing."
 
 
 def stop_application(store: Store, job_id: str, status: str = "failed", summary: str = STOP_SUMMARY) -> dict[str, Any]:
@@ -241,17 +253,22 @@ def run_application(store: Store, app: dict[str, Any]) -> dict[str, Any]:
     last_status = (app.get("result") or {}).get("status")
     # Resume the same Claude session when the user answered questions or finished a login/CAPTCHA handoff;
     # otherwise (first run, or a retry after a hard failure) start fresh.
-    resuming = bool(app.get("session_id")) and (bool(answered) or last_status in ("needs_login", "captcha"))
+    resuming = bool(app.get("session_id")) and (bool(answered) or last_status in ("needs_login", "captcha", "needs_cover_letter"))
     settings = app.get("settings") or effective_settings()
-    if resuming:
-        prompt = resume_message(answered, work_dir, after=last_status)
-    else:  # a resumed session already has its cover letter
-        from jobFilter import cover_letter
-        with log_path.open("a") as log:
-            letter = cover_letter.prepare(app, settings, log=lambda line: (log.write(line + "\n"), log.flush()))
-        prompt = build_prompt(app, work_dir, letter)
-        if not _still_running(store, job_id):   # stopped or deleted while the letter was written
-            return {"status": "stopped", "summary": STOP_SUMMARY}
+    with log_path.open("a") as log:
+        def note(line: str) -> None:
+            log.write(line + "\n"); log.flush()
+        # The letter is written only once the form turns out to have a cover letter field.
+        if resuming:
+            letter = cover_letter.prepare(app, settings, log=note) if last_status == "needs_cover_letter" else None
+            prompt = resume_message(answered, work_dir, after=last_status, letter=letter)
+            letter_given = letter is not None or cover_letter.load(job_id).get("status") in ("ok", "failed")
+        else:
+            letter = cover_letter.prepare(app, settings, log=note, write=False)
+            prompt = build_prompt(app, work_dir, letter)
+            letter_given = letter["status"] != "pending"
+    if not _still_running(store, job_id):   # stopped or deleted while the letter was written
+        return {"status": "stopped", "summary": STOP_SUMMARY}
 
     cmd = [claude, "-p", prompt, "--chrome", "--output-format", "stream-json", "--verbose",
            "--json-schema", json.dumps(RESULT_SCHEMA), "--max-turns", str(settings["max_turns"]),
@@ -306,9 +323,16 @@ def run_application(store: Store, app: dict[str, Any]) -> dict[str, Any]:
             store.add_question(job_id, q["question"], q.get("options"))
     if status == "needs_answer" and not out.get("unanswered_questions"):
         status = "failed"
+    if status == "needs_cover_letter":
+        status, summary = ("failed", "Stopped for a cover letter again after being given an answer. " + summary) if letter_given \
+            else ("queued", COVER_LETTER_SUMMARY)
     store.update_application(job_id, status=status, summary=summary, page_url=out.get("page_url"),
                              screenshot=screenshot, session_id=session_id, result=out or result_evt)
     store.conn.commit()
+    if status == "queued":   # write the letter and continue at once, while the tab is still on that field
+        current = store.get_application(job_id)
+        if current and current["status"] == "queued":
+            return run_application(store, current)
     return {"status": status, "summary": summary}
 
 

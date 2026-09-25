@@ -109,7 +109,7 @@ def _iso() -> str:
 
 NORM_KEY_VERSION = 3  # 2: company+title+location; 3: canonical employer requisition URLs
 
-APP_STATUSES = ("queued", "running", "review_ready", "needs_answer", "needs_login", "captcha",
+APP_STATUSES = ("queued", "running", "review_ready", "needs_answer", "needs_cover_letter", "needs_login", "captcha",
                 "already_applied", "unavailable", "failed", "submitted", "skipped")
 ACTIVE_STATUSES = ("queued", "running")
 

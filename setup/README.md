@@ -25,14 +25,17 @@ it per job with **Resume** when you click Prepare application. Without an MLE
 PDF, every job uses the default resume. The rules are `RESUME_RULES` in
 `jobFilter/profile.py`.
 
-**Cover letters.** Before each application starts, JobAppBot writes a cover
-letter from the template of the same version (falling back to the SDE one) and
-the job's description. The provider and model you chose for the application
-fill every `[bracketed]` placeholder and tailor the wording, using only facts
-from the template and the resume. The letter is saved as a one-page PDF in the
-template's font and layout (`data/apply/<job>/Cover_Letter_<Name>_<Company>.pdf`).
-It is uploaded whenever the form has a cover letter field, required or optional,
-and you can open it from the application in the UI. A letter is sent back once
+**Cover letters.** A cover letter is written only when the application form has
+a cover letter field, required or optional. When the form filler reaches one, it
+pauses on that page (`needs_cover_letter`). JobAppBot then writes the letter from
+the template of the same version (falling back to the SDE one) and the job's
+description, and the same run continues right away and uploads it. Forms without
+the field cost nothing extra. The provider and model you chose for the
+application fill every `[bracketed]` placeholder and tailor the wording, using
+only facts from the template and the resume. The letter is saved as a one-page
+PDF in the template's font and layout
+(`data/apply/<job>/Cover_Letter_<Name>_<Company>.pdf`) and reused if you run the
+application again. You can open it from the application in the UI. A letter is sent back once
 if it leaves a bracket, uses a number not found in the template, resume or
 posting, or runs past one page; if it still fails, the application continues
 without one. Without a template, no letter is written.

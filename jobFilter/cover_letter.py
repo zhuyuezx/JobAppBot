@@ -1,4 +1,4 @@
-"""Tailored cover letters, written before the browser run so the form filler can upload one.
+"""Tailored cover letters, written only for forms that have a cover letter field.
 
     setup/cover_letter/*.docx                  Word templates, versioned by name like resumes (*_SDE_*, *_MLE_*)
     data/apply/<job>/cover_letter.json         the letter's text, template, model and status
@@ -13,6 +13,11 @@ paragraph count changed, a number appears in none of the template, resume or
 posting, or it runs past one page. The PDF is drawn with PyMuPDF in the
 template's page size, margins, font and spacing. A failure only means there is
 no cover letter; the application still runs.
+
+Most forms have no cover letter field, so the browser run starts without one
+(or with the letter an earlier attempt wrote). When the form filler reaches a
+cover letter field it stops with status needs_cover_letter; the engine then
+writes the letter here and resumes the same run with the file.
 """
 from __future__ import annotations
 
@@ -315,25 +320,41 @@ def load(job_id: str) -> dict[str, Any]:
         return {}
 
 
-def prepare(app: dict[str, Any], settings: dict[str, Any], log: Callable[[str], None] = lambda _: None) -> dict[str, Any]:
-    """This application's cover letter: the one already written for it, else a new one. Never raises."""
-    work = work_directory(app["job_id"])
+def prepare(app: dict[str, Any], settings: dict[str, Any], log: Callable[[str], None] = lambda _: None,
+            write: bool = True) -> dict[str, Any]:
+    """This application's cover letter: the one already written for it, else a new one. Never raises.
+
+    With write=False nothing costs an LLM call: the result is the reusable letter, "skipped"
+    without a template, or "pending" (the browser run asks for one if the form has the field).
+    """
     version = profile.job_resume(app["job"], (app.get("settings") or {}).get("resume"))[0]
     template = profile.cover_letter_template(version)
     if not template:
-        letter = {"status": "skipped", "reason": "no cover letter template in setup/cover_letter/"}
-    else:
-        old = load(app["job_id"])
-        if (old.get("status") == "ok" and old.get("template") == str(template)
-                and old.get("template_mtime") == template.stat().st_mtime and Path(old.get("path", "")).is_file()):
-            log(f"Cover letter: reusing {Path(old['path']).name}")
-            return old
-        log(f"Cover letter: writing from {template.name} ...")
-        try:
-            letter = _write(app, settings, template, work, log)
-        except Exception as e:
-            letter = {"status": "failed", "reason": str(e)[:500], "template": str(template)}
+        return {"status": "skipped", "reason": "no cover letter template in setup/cover_letter/"}
+    old = load(app["job_id"])
+    if (old.get("status") == "ok" and old.get("template") == str(template)
+            and old.get("template_mtime") == template.stat().st_mtime and Path(old.get("path", "")).is_file()):
+        log(f"Cover letter: reusing {Path(old['path']).name}")
+        return old
+    if not write:
+        return {"status": "pending", "reason": "written only if the form has a cover letter field"}
+    work = work_directory(app["job_id"])
+    log(f"Cover letter: the form has a cover letter field; writing from {template.name} ...")
+    try:
+        letter = _write(app, settings, template, work, log)
+    except Exception as e:
+        letter = {"status": "failed", "reason": str(e)[:500], "template": str(template)}
     log("Cover letter: " + (f"wrote {Path(letter['path']).name}" if letter["status"] == "ok" else f"none ({letter['reason']})"))
     letter["updated"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     (work / META).write_text(json.dumps(letter, indent=2, ensure_ascii=False) + "\n")
     return letter
+
+
+def task_line(letter: dict[str, Any]) -> str:
+    """How the browser run's task names the cover letter (see the skill's Cover letter section)."""
+    if letter.get("status") == "ok":
+        return letter["path"]
+    if letter.get("status") == "pending":
+        return ("(not written yet: if the form has a cover letter field, required or optional, "
+                "stop with status needs_cover_letter as the Cover letter section says)")
+    return f"(none: {letter.get('reason') or 'not written'})"

@@ -18,7 +18,7 @@ APPLY_DIR = Path(__file__).resolve().parent.parent / "data" / "apply"
 RESULT_SCHEMA = {
     "type": "object",
     "properties": {
-        "status": {"type": "string", "enum": ["review_ready", "needs_answer", "needs_login", "captcha", "already_applied", "unavailable", "failed"]},
+        "status": {"type": "string", "enum": ["review_ready", "needs_answer", "needs_cover_letter", "needs_login", "captcha", "already_applied", "unavailable", "failed"]},
         "summary": {"type": "string", "description": "What was filled, what is left, and any blocker. Never include passwords or authentication secrets."},
         "page_url": {"type": "string", "description": "URL of the tab where the application currently is."},
         "unanswered_questions": {
