@@ -8,8 +8,9 @@ async function api(path, body) {
   return r.json();
 }
 const VIA_LABEL = { hiringcafe: 'hiring.cafe', simplify: 'Simplify', startupjobs: 'startup.jobs', applyguy: 'ApplyGuy' };
-const STATUS_CLASS = { queued: '', running: 'warn', review_ready: 'ok', needs_answer: 'warn', needs_login: 'warn', captcha: 'warn', already_applied: '', failed: 'bad', submitted: 'ok', skipped: '' };
-const STATUS_LABEL = { queued: 'queued', running: 'working', review_ready: 'ready to submit', needs_answer: 'needs your answer', needs_login: 'needs login / code', captcha: 'CAPTCHA', already_applied: 'already applied', failed: 'failed', submitted: 'submitted', skipped: 'skipped' };
+const STATUS_CLASS = { queued: '', running: 'warn', review_ready: 'ok', needs_answer: 'warn', needs_login: 'warn', captcha: 'warn', already_applied: '', unavailable: '', failed: 'bad', submitted: 'ok', skipped: '' };
+const STATUS_LABEL = { queued: 'queued', running: 'working', review_ready: 'ready to submit', needs_answer: 'needs your answer', needs_login: 'needs login / code', captcha: 'CAPTCHA', already_applied: 'already applied', unavailable: 'unavailable', failed: 'failed', submitted: 'submitted', skipped: 'skipped' };
+const CLOSED_STATUSES = ['unavailable', 'already_applied'];
 const badge = st => st ? `<span class="badge ${STATUS_CLASS[st] || ''}">${esc(STATUS_LABEL[st] || st)}</span>` : '';
 const SP_LABEL = { likely: 'sponsor: likely', unlikely: 'sponsor: unlikely', unknown: 'sponsor: unknown' };
 function spBadge(sc) {
@@ -35,6 +36,7 @@ function reviewBadges(r) {
 const ROW_ICONS = {
   submitted:'<circle cx="12" cy="12" r="9"/><path d="m7 12 3 3 7-7"/>',
   unsuitable:'<circle cx="12" cy="12" r="9"/><path d="m6 6 12 12"/>',
+  unavailable:'<circle cx="12" cy="12" r="9"/><path d="M7 12h10"/>',
   tags:'<path d="M3 3h8l10 10-8 8L3 11Z"/><circle cx="7.5" cy="7.5" r="1"/>'
 };
 function rowActions(r) {
@@ -44,8 +46,12 @@ function rowActions(r) {
   const hint = (text, button) => `<span class="icon-action">${button}<span class="icon-hint" aria-hidden="true">${esc(text)}</span></span>`;
   const submittedText = status === 'submitted' ? 'Already submitted' : ['queued','running'].includes(status) ? 'Wait for the active attempt to finish' : 'Mark submitted';
   const unsuitableText = unsuitable ? 'Clear not suitable → Needs review' : 'Mark not suitable';
+  const closed = CLOSED_STATUSES.includes(status);
+  const unavailableText = closed ? `${STATUS_LABEL[status][0].toUpperCase() + STATUS_LABEL[status].slice(1)} · click to clear`
+    : ['queued','running'].includes(status) ? 'Stop the attempt and mark the job unavailable' : 'Mark unavailable (closed or already applied)';
   return `<div class="row-actions">
     ${hint(submittedText, `<button class="btn icon-btn ${status === 'submitted' ? 'is-submitted' : ''}" data-act="mark-submitted" aria-label="${submittedText}" ${['submitted','queued','running'].includes(status) ? 'disabled' : ''}>${icon('submitted')}</button>`)}
+    ${hint(unavailableText, `<button class="btn icon-btn ${closed ? 'is-unavailable' : ''}" data-act="toggle-unavailable" aria-pressed="${closed}" aria-label="${unavailableText}" ${status === 'submitted' ? 'disabled' : ''}>${icon('unavailable')}</button>`)}
     ${hint(unsuitableText, `<button class="btn icon-btn ${unsuitable ? 'is-unsuitable' : ''}" data-act="toggle-suitability" aria-pressed="${unsuitable}" aria-label="${unsuitable ? 'Clear not suitable mark' : 'Mark not suitable'}">${icon('unsuitable')}</button>`)}
     ${hint('Manage tags and suitability', `<button class="btn icon-btn" data-act="manage-tags" aria-label="Manage tags">${icon('tags')}</button>`)}
   </div>`;
@@ -56,7 +62,7 @@ async function refreshAfterReview() {
 }
 async function handleRowAction(act, id) {
   const kind = act.dataset.act;
-  if (!['mark-submitted','toggle-suitability','manage-tags'].includes(kind)) return false;
+  if (!['mark-submitted','toggle-suitability','toggle-unavailable','manage-tags'].includes(kind)) return false;
   act.disabled = true;
   try {
     if (kind === 'manage-tags') {
@@ -68,6 +74,12 @@ async function handleRowAction(act, id) {
       if (kind === 'mark-submitted') {
         const note = act.closest('.app')?.querySelector('[data-note]')?.value;
         result = await api('/api/applications/status', {job_id:id, status:'submitted', ...(note === undefined ? {} : {note})});
+      } else if (kind === 'toggle-unavailable') {
+        const row = (tab === 'jobs' ? rows : apps).find(r => (r.id || r.job_id) === id);
+        const status = row?.app_status || row?.status, closed = CLOSED_STATUSES.includes(status);
+        if (!closed && ['queued','running'].includes(status) && !confirm('Stop the running application and mark this job unavailable?')) return true;
+        const note = act.closest('.app')?.querySelector('[data-note]')?.value;
+        result = await api('/api/applications/unavailable', {job_id:id, unavailable:!closed, ...(note === undefined ? {} : {note})});
       } else {
         const row = (tab === 'jobs' ? rows : apps).find(r => (r.id || r.job_id) === id);
         result = await api('/api/jobs/review', {job_id:id, conclusion:row?.review?.state === 'not_suitable' ? 'needs_review' : 'not_suitable'});
@@ -180,15 +192,18 @@ let launchDefaults = {}, launchModels = [];
 function launchChoice(id) {
   return launchDrafts.get(id) || {engine: applicationEngine,
     model: applicationEngine === 'codex-playwright' ? (launchDefaults.codex_model || 'gpt-5.6-luna') : (launchDefaults.model || 'opus'),
-    effort: launchDefaults.codex_reasoning_effort || ''};
+    effort: launchDefaults.codex_reasoning_effort || '', resume: 'auto'};
 }
+const RESUME_VERSIONS = {sde: 'SDE', mle: 'MLE'};
 function launchControls(id) {
   const choice = launchChoice(id), gpt = choice.engine === 'codex-playwright';
+  const auto = RESUME_VERSIONS[rows.find(r => r.id === id)?.resume_auto] || 'SDE';
   const models = [...new Set([...(gpt ? launchModels : ['opus', 'sonnet', 'haiku']), ...(choice.model ? [choice.model] : [])])];
   return `<div class="launch-options settings-fields" data-launch-id="${esc(id)}">
     <label>Application provider<select data-run-engine><option value="claude-chrome" ${!gpt ? 'selected' : ''}>Claude Code</option><option value="codex-playwright" ${gpt ? 'selected' : ''}>ChatGPT / Codex</option></select></label>
     <label>Application model<select data-run-model><option value="">Choose a model</option>${models.map(m => `<option value="${esc(m)}" ${choice.model === m ? 'selected' : ''}>${esc(m)}</option>`).join('')}</select></label>
     ${gpt ? `<label>Thinking level<select data-run-effort>${[['','Model default'],['low','Low'],['medium','Medium'],['high','High'],['xhigh','Extra high']].map(([v,label]) => `<option value="${v}" ${choice.effort === v ? 'selected' : ''}>${label}</option>`).join('')}</select></label>` : ''}
+    <label>Resume<select data-run-resume>${[['auto', `Auto from title (${auto})`], ...Object.entries(RESUME_VERSIONS)].map(([v,label]) => `<option value="${v}" ${choice.resume === v ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
     <span class="muted">Your last-used choices are preselected. Starting an application remembers these choices for next time.</span>
   </div>`;
 }
@@ -199,16 +214,25 @@ $('#list').addEventListener('change', e => {
     choice.engine = e.target.value;
     choice.model = choice.engine === 'codex-playwright' ? (launchDefaults.codex_model || 'gpt-5.6-luna') : (launchDefaults.model || 'opus');
     choice.effort = launchDefaults.codex_reasoning_effort || '';
-  } else { choice.model = box.querySelector('[data-run-model]').value; choice.effort = box.querySelector('[data-run-effort]')?.value || ''; }
+  } else { choice.model = box.querySelector('[data-run-model]').value; choice.effort = box.querySelector('[data-run-effort]')?.value || ''; choice.resume = box.querySelector('[data-run-resume]').value; }
   launchDrafts.set(id, choice);
   if (e.target.matches('[data-run-engine]')) box.outerHTML = launchControls(id);
 });
+// The same posting listed by another source (see jobFilter/duplicates.py).
+const earlierCopies = r => (r.duplicates || []).filter(d => (d.first_seen || '') < (r.first_seen || ''));
+function duplicateBadge(r) {
+  const same = r.duplicates || []; if (!same.length) return '';
+  const applied = same.find(d => d.app_status), earlier = earlierCopies(r);
+  const title = same.map(d => `Same posting on ${VIA_LABEL[d.via] || d.via} (${d.location || 'no location'}), found ${fmt(d.first_seen)}${d.app_status ? ' · application: ' + (STATUS_LABEL[d.app_status] || d.app_status) : ''}`).join('\n');
+  const via = VIA_LABEL[(earlier[0] || same[0]).via] || (earlier[0] || same[0]).via;
+  return `<span class="badge ${applied ? 'warn' : ''}" title="${esc(title)}">${earlier.length ? 'seen before' : 'also'} on ${esc(via)}${applied ? ' · ' + esc(STATUS_LABEL[applied.app_status] || applied.app_status) : ''}</span>`;
+}
 function rowHtml(r) {
   const j = r.job, link = j.apply_url || r.hc_url;
   return `<div class="job" data-id="${esc(r.id)}">
       <div class="row">
         <div class="title"><span class="chev" aria-hidden="true">&#9654;</span><a href="${esc(link)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(j.title)}</a>
-          ${isRecent(r.first_seen) ? '<span class="badge warn">new</span>' : ''}${(srcFilter === 'all') ? `<span class="badge" title="found via ${esc(j.via || 'hiringcafe')}">${esc(VIA_LABEL[j.via] || 'hiring.cafe')}</span>` : ''}${reviewBadges(r)}${badge(r.app_status)}</div>
+          ${isRecent(r.first_seen) && !earlierCopies(r).length ? '<span class="badge warn">new</span>' : ''}${duplicateBadge(r)}${(srcFilter === 'all') ? `<span class="badge" title="found via ${esc(j.via || 'hiringcafe')}">${esc(VIA_LABEL[j.via] || 'hiring.cafe')}</span>` : ''}${reviewBadges(r)}${badge(r.app_status)}</div>
         <div class="muted" title="${esc(j.company)}">${esc(j.company)}</div>
         <div class="muted" title="${esc(j.location)}">${esc(j.location || '')}</div>
         <div class="found" title="found ${esc(fmt(r.first_seen))} · posted ${esc(fmt(j.published_at))}">found ${localTime(r.first_seen)}<small>posted ${esc((j.published_at || '').slice(0, 10))}</small></div>
@@ -216,6 +240,7 @@ function rowHtml(r) {
       </div>
       <div class="details">
         ${screenBlock(r)}
+        ${(r.duplicates || []).length ? `<p class="help">Same posting elsewhere: ${r.duplicates.map(d => `<a href="${esc(d.apply_url || '#')}" target="_blank" rel="noopener">${esc(VIA_LABEL[d.via] || d.via)}</a> (${esc(d.location || 'no location')}, found ${esc(fmt(d.first_seen))}${d.app_status ? ', application ' + esc(STATUS_LABEL[d.app_status] || d.app_status) : ''})`).join('; ')}</p>` : ''}
         ${jobDetails(j, r)}
         ${!r.app_status ? launchControls(r.id) : ''}
         <div class="actions">
@@ -296,7 +321,10 @@ $('#list').addEventListener('click', async e => {
       const engine = box.querySelector('[data-run-engine]').value;
       const model = box.querySelector('[data-run-model]').value;
       if (!model) { alert('Choose an application model first.'); return; }
-      const settings = engine === 'codex-playwright' ? {codex_model: model, codex_reasoning_effort: box.querySelector('[data-run-effort]').value} : {model};
+      const twin = (rows.find(x => x.id === job.dataset.id)?.duplicates || []).find(d => d.app_status);
+      if (twin && !confirm(`This posting already has an application via ${VIA_LABEL[twin.via] || twin.via} (${STATUS_LABEL[twin.app_status] || twin.app_status}). Prepare another one anyway?`)) return;
+      const settings = {...(engine === 'codex-playwright' ? {codex_model: model, codex_reasoning_effort: box.querySelector('[data-run-effort]').value} : {model}),
+        resume: box.querySelector('[data-run-resume]').value};
       act.disabled = true; act.textContent = 'Queued...';
       const r = await api('/api/applications/queue', { job_id: job.dataset.id, engine, settings });
       if (r.error) { alert(r.error); act.disabled = false; act.textContent = 'Prepare application'; return; }
@@ -315,10 +343,12 @@ $('#list').addEventListener('click', async e => {
 let apps = [], appsTimer = null, appsRequest = 0, previousAppStatuses = new Map();
 const expandedApps = new Set(), applicationDrafts = new Map();
 const workingApplication = a => ['running', 'queued'].includes(a.status);
+// Terminal: the attempt is over. Everything else stays pinned at the top of Applications.
+const TERMINAL_STATUSES = ['submitted', 'already_applied', 'unavailable', 'failed', 'skipped'];
 const ATTENTION_STATUSES = ['review_ready', 'needs_answer', 'needs_login', 'captcha'];
-const attentionApplication = a => ATTENTION_STATUSES.includes(a.status) && a.review?.state !== 'not_suitable';
-// Keep real work visible, but don't keep rejected jobs waiting for user attention.
-const activeApplication = a => workingApplication(a) || attentionApplication(a);
+const attentionApplication = a => ATTENTION_STATUSES.includes(a.status);
+// Pinned until the attempt reaches a terminal state, whatever the job's suitability.
+const activeApplication = a => !TERMINAL_STATUSES.includes(a.status);
 const activePriority = a => a.status === 'running' ? 0 : a.status === 'queued' ? 1 : activeApplication(a) ? 2 : 3;
 let applicationEngine = 'claude-chrome', screeningProvider = 'claude', screeningEnabled = true;
 function updateAttention(count) { $('#appsBadge').hidden = !count; $('#appsBadge').textContent = count; }
@@ -478,6 +508,10 @@ function appDetails(a) {
       <dt>Provider</dt><dd>${providerName(a.engine)}</dd>
       <dt>Submitted</dt><dd>${a.submitted_at ? fmt(a.submitted_at) + (a.submitted_at_estimated ? ' (estimated from legacy last update)' : '') : 'Not recorded'}</dd>
       ${a.settings ? `<dt>Model</dt><dd>${esc(a.engine === 'codex-playwright' ? a.settings.codex_model : a.settings.model)}${a.engine === 'codex-playwright' ? ' · thinking: ' + esc(a.settings.codex_reasoning_effort || 'model default') : ''}</dd>` : ''}
+      ${a.resume_version && a.engine !== 'manual' ? `<dt>Resume</dt><dd>${esc(a.resume_version)}</dd>` : ''}
+      ${a.cover_letter?.status ? `<dt>Cover letter</dt><dd>${a.cover_letter.status === 'ok'
+        ? `<a href="/api/file?path=${encodeURIComponent(a.cover_letter.path)}" target="_blank" rel="noopener">${esc(a.cover_letter.path.split('/').pop())}</a>${a.cover_letter.notes ? ` <span class="muted">${esc(a.cover_letter.notes)}</span>` : ''}`
+        : `<span class="muted">none: ${esc(a.cover_letter.reason || a.cover_letter.status)}</span>`}</dd>` : ''}
       <dt>Summary</dt><dd>${esc(a.summary || '')}</dd>
       ${a.page_url ? `<dt>Tab</dt><dd><a href="${esc(a.page_url)}" target="_blank" rel="noopener">${esc(a.page_url)}</a></dd>` : ''}
       <dt>Note</dt><dd><input type="text" data-note value="${esc(draft.note ?? a.note ?? '')}" placeholder="your note, saved with status changes" style="width:100%"></dd>
@@ -490,8 +524,9 @@ function appDetails(a) {
       </div>`).join('') : ''}
     <div class="actions">
       ${['review_ready','needs_login','captcha'].includes(a.status) ? `<a class="btn primary" href="${esc(a.page_url || j.apply_url)}" target="_blank" rel="noopener">Open the tab and finish</a>` : ''}
-      ${a.engine !== 'manual' && ['failed','needs_login','captcha','already_applied','skipped','submitted'].includes(a.status) ? `<button class="btn" data-act="retry">Run again</button>` : ''}
-      ${['queued','running'].includes(a.status) ? `<button class="btn" data-act="status" data-status="skipped">Cancel</button>` : `<button class="btn" data-act="status" data-status="skipped">Skip</button>`}
+      ${a.engine !== 'manual' && ['failed','needs_login','captcha','already_applied','unavailable','skipped','submitted'].includes(a.status) ? `<button class="btn" data-act="retry">Run again</button>` : ''}
+      ${['queued','running'].includes(a.status) ? `<button class="btn" data-act="stop" title="End this attempt now; its record stays as failed">Stop</button>` : a.status !== 'skipped' ? `<button class="btn" data-act="status" data-status="skipped">Skip</button>` : ''}
+      <button class="btn" data-act="delete" title="Stop it if needed, then remove the application, its questions and files">Delete</button>
       <button class="btn" data-act="refresh">Refresh</button>
     </div>
     ${a.screenshot ? `<img class="shot" src="/api/file?path=${encodeURIComponent(a.screenshot)}" alt="review page">` : ''}
@@ -506,7 +541,7 @@ function renderApps() {
   $('#count').textContent = Object.entries(counts).map(([k, v]) => `${v} ${STATUS_LABEL[k] || k}`).join(' · ');
   updateAttention(apps.filter(attentionApplication).length);
   if (!apps.length) { $('#apps').innerHTML = '<div class="empty">No applications yet. Open a job in Jobs to prepare an application or mark it submitted.</div>'; return; }
-  const order = ['needs_answer', 'review_ready', 'needs_login', 'captcha', 'running', 'queued', 'failed', 'already_applied', 'submitted', 'skipped'];
+  const order = ['needs_answer', 'review_ready', 'needs_login', 'captcha', 'running', 'queued', 'failed', 'already_applied', 'unavailable', 'submitted', 'skipped'];
   const sort = $('#appSort').value;
   const recent = (x, y) => (y.updated_at || '').localeCompare(x.updated_at || '') || x.job_id.localeCompare(y.job_id);
   apps.sort((x, y) => {
@@ -520,7 +555,7 @@ function renderApps() {
     if (sort === 'company') return (x.job.company || '').localeCompare(y.job.company || '') || recent(x, y);
     return recent(x, y);
   });
-  const visible = apps.filter(a => !$('#unfinishedOnly').checked || !['submitted','already_applied','skipped'].includes(a.status));
+  const visible = apps.filter(a => !$('#unfinishedOnly').checked || !['submitted','already_applied','unavailable','skipped'].includes(a.status));
   $('#apps').innerHTML = visible.map((a, rank) => `<div class="app ${expandedApps.has(a.job_id) ? 'open' : ''} ${a.status === 'running' ? 'working' : ''}" data-id="${esc(a.job_id)}">
       <div class="row">
         <div class="title"><span class="badge">#${rank + 1}</span><span class="chev" aria-hidden="true">&#9654;</span><a href="${esc(a.job.apply_url || a.hc_url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(a.job.title)}</a>${badge(a.status)}<span class="badge">${providerName(a.engine)}</span>${a.open_questions ? `<span class="badge warn">${a.open_questions} question${a.open_questions > 1 ? 's' : ''}</span>` : ''}</div>
@@ -572,6 +607,12 @@ $('#apps').addEventListener('click', async e => {
       if (r.error) { alert(r.error); return; }
     }
     else if (kind === 'retry') await api('/api/applications/retry', { job_id: id });
+    else if (kind === 'stop' || kind === 'delete') {
+      if (kind === 'delete' && !confirm('Delete this application with its questions, log, screenshots and cover letter? The job stays in Jobs, and you can prepare it again.')) return;
+      const r = await api('/api/applications/' + kind, { job_id: id });
+      if (r.error) { alert(r.error); return; }
+      if (kind === 'delete') { expandedApps.delete(id); applicationDrafts.delete(id); }
+    }
     else if (kind === 'answer' || kind === 'answer-once') {
       const qel = act.closest('.q'); const ans = qel.querySelector('[data-answer]').value.trim();
       if (!ans) return;
@@ -593,7 +634,11 @@ async function loadProfile() {
   const [{ profile, status }, answers] = await Promise.all([api('/api/profile'), api('/api/answers')]);
   $('#profileStatus').innerHTML = [
     status.profile_exists ? '✓ setup/profile.json' : '✗ not saved yet (showing the template)',
-    status.resume ? '✓ resume: ' + esc(status.resume.split('/').pop()) + ` (${status.resume_text_chars} chars extracted)` : '✗ put a PDF in setup/resume/',
+    status.resume ? '✓ SDE resume (default): ' + esc(status.resume.split('/').pop()) + ` (${status.resume_text_chars} chars extracted)` : '✗ put a PDF in setup/resume/',
+    ...Object.entries(status.resume_versions || {}).map(([v, p]) => p ? `✓ ${v.toUpperCase()} resume: ${esc(p.split('/').pop())}`
+      : `${v.toUpperCase()} resume: none, uses the default (add a PDF named *_${v.toUpperCase()}_*.pdf to setup/resume/)`),
+    ...Object.entries(status.cover_letter_templates || {}).map(([v, p]) => p ? `✓ ${v.toUpperCase()} cover letter template: ${esc(p.split('/').pop())}`
+      : `${v.toUpperCase()} cover letter template: none (add *_${v.toUpperCase()}_*.docx to setup/cover_letter/)`),
     `${answers.length} bank answers`].map(x => `<span>${x}</span>`).join('');
   $('#profileText').value = JSON.stringify(profile, null, 2);
   $('#answers').innerHTML = answers.length ? '<tr><th>Question</th><th>Answer</th><th></th></tr>' + answers.map(a =>

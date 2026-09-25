@@ -105,6 +105,7 @@
   .icon-btn:hover { border-color:var(--accent); color:var(--accent); }
   .icon-btn.is-unsuitable { color:var(--badfg); background:var(--bad); }
   .icon-btn.is-submitted { color:var(--okfg); background:var(--ok); border-color:var(--okfg); opacity:1; }
+  .icon-btn.is-unavailable { color:var(--warnfg); background:var(--warn); border-color:var(--warnfg); }
   .icon-action { position:relative; display:inline-flex; }
   .icon-hint { visibility:hidden; position:absolute; right:0; top:calc(100% + 7px); z-index:6; width:max-content; max-width:min(260px, calc(100vw - 40px)); padding:7px 10px; border:1px solid var(--line); border-radius:7px; background:var(--fg); color:var(--bg); box-shadow:0 3px 12px #0003; font-size:12px; font-weight:400; white-space:normal; pointer-events:none; }
   .icon-action:hover .icon-hint, .icon-action:focus-within .icon-hint { visibility:visible; }

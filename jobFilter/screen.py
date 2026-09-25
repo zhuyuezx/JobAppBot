@@ -103,9 +103,7 @@ def save_screening_settings(path: Path, updates: dict[str, Any]) -> dict[str, An
     return result
 
 
-def company_key(name: str) -> str:
-    n = re.sub(r"\b(inc|llc|ltd|corp|corporation|co|company|limited|plc|group|holdings|technologies|technology)\b\.?", " ", (name or "").lower())
-    return re.sub(r"[^a-z0-9]+", " ", n).strip()
+from jobFilter.duplicates import company_key  # noqa: E402  (shared with duplicate tagging)
 
 
 from jobFilter.descriptions import fetch_description  # noqa: E402,F401  (kept for callers)
@@ -141,13 +139,24 @@ POSTING TEXT
 """
 
 
-def run_claude(prompt: str, model: str, max_turns: int) -> tuple[dict[str, Any], dict[str, Any]]:
+def run_claude(prompt: str, model: str, max_turns: int, schema: Optional[dict[str, Any]] = None,
+               tools: tuple[str, ...] = ("WebSearch", "WebFetch"),
+               only_these_tools: bool = False) -> tuple[dict[str, Any], dict[str, Any]]:
+    """One headless Claude call with a structured result (screening by default; also cover letters).
+
+    `tools` are pre-approved; `only_these_tools` also removes every other built-in tool,
+    so an empty `tools` makes it a plain one-turn answer.
+    """
     claude = find_claude()
     if not claude:
         raise RuntimeError("claude binary not found (set JOBFILTER_CLAUDE)")
-    cmd = [claude, "-p", prompt, "--output-format", "json", "--json-schema", json.dumps(SCHEMA),
-           "--model", model, "--max-turns", str(max_turns), "--allowedTools", "WebSearch", "WebFetch",
-           "--no-session-persistence"]
+    cmd = [claude, "-p", prompt, "--output-format", "json", "--json-schema", json.dumps(schema or SCHEMA),
+           "--model", model, "--max-turns", str(max_turns)]
+    if only_these_tools:
+        cmd += ["--tools", ",".join(tools)]
+    if tools:
+        cmd += ["--allowedTools", *tools]
+    cmd.append("--no-session-persistence")
     env = {k: v for k, v in os.environ.items() if k not in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT")}
     proc = subprocess.run(cmd, cwd=ROOT, env=env, capture_output=True, text=True, timeout=900)
     raw = proc.stdout.strip()

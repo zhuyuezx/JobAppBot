@@ -30,6 +30,7 @@ def main():
     profile.PROFILE_PATH, profile.ANSWERS_PATH = root / 'profile.json', root / 'answers.json'
     profile.SETTINGS_PATH = root / 'settings.json'
     profile.RESUME_DIR, profile.RESUME_TEXT_PATH = root / 'resume', root / 'resume.txt'
+    profile.COVER_LETTER_DIR = root / 'cover_letter'   # no template: no cover letter
     application_state.APPLY_DIR = root / 'apply'
     profile.RESUME_DIR.mkdir()
     # A tiny valid PDF avoids adding a PDF-generation dependency to the test.

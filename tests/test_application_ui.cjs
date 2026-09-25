@@ -33,7 +33,7 @@ function application(status, id = status) {
 }
 
 const pending = ['queued', 'running', 'review_ready', 'needs_answer', 'needs_login', 'captcha'];
-const terminal = ['submitted', 'already_applied', 'skipped', 'failed'];
+const terminal = ['submitted', 'already_applied', 'unavailable', 'skipped', 'failed'];
 
 test('working and pending applications precede terminal entries in every sort mode', async () => {
   const ui = frontend();
@@ -43,7 +43,7 @@ test('working and pending applications precede terminal entries in every sort mo
     ui.$('#appSort').value = sort;
     ui.run('renderApps()');
     const ids = [...ui.$('#apps').innerHTML.matchAll(/class="app [^"]*" data-id="([^"]+)"/g)].map(m => m[1]);
-    assert.equal(ids.length, 10);
+    assert.equal(ids.length, 11);
     assert.deepEqual(new Set(ids.slice(0, 6)), new Set(pending), sort);
   }
   const popup = ui.$('#activityItems').innerHTML;
@@ -73,30 +73,23 @@ test('blocked transitions stay pinned, open details, and leave activity only at 
   }
 });
 
-test('unsuitable pending jobs leave activity and attention, and return when reconsidered', async () => {
+test('pending jobs stay pinned whatever their suitability, until a terminal state', async () => {
   const ui = frontend();
   for (const status of ['captcha', 'needs_login', 'needs_answer', 'review_ready']) {
-    const job = application(status, 'spacex');
-    job.review = {state: 'needs_review'};
-    ui.context.records = [application('submitted', 'finished'), job];
+    for (const state of ['needs_review', 'not_suitable']) {
+      const job = {...application(status, 'spacex'), review: {state}};
+      ui.context.records = [application('submitted', 'finished'), job];
+      await ui.run('loadApps()');
+      ui.run('renderApps()');
+      assert.match(ui.$('#apps').innerHTML, /^<div class="app [^"]*" data-id="spacex"/, `${status} / ${state}`);
+      assert.match(ui.$('#activityItems').innerHTML, /data-activity-id="spacex"/);
+      assert.equal(ui.$('#appsBadge').textContent, 1);
+    }
+  }
+  for (const status of terminal) {
+    ui.context.records = [application('submitted', 'finished'), {...application(status, 'spacex'), review: {state: 'needs_review'}}];
     await ui.run('loadApps()');
-    assert.match(ui.$('#activityItems').innerHTML, /data-activity-id="spacex"/);
-
-    job.review = {state: 'not_suitable'};
-    await ui.run('loadApps()');
-    ui.run('renderApps()');
     assert.equal(ui.$('#applicationActivity').hidden, true, status);
-    assert.equal(ui.$('#appsBadge').hidden, true, status);
-    assert.match(ui.$('#apps').innerHTML, /^<div class="app [^"]*" data-id="finished"/);
-    assert.ok(ui.$('#apps').innerHTML.includes('data-id="spacex"'), 'history is retained');
-    assert.equal(job.status, status, 'suitability does not rewrite application status');
-
-    ui.run("expandedApps.delete('spacex')");
-    job.review = {state: 'needs_review'};
-    await ui.run('loadApps()');
-    assert.equal(ui.$('#applicationActivity').hidden, false);
-    assert.equal(ui.$('#appsBadge').textContent, 1);
-    assert.equal(ui.run("expandedApps.has('spacex')"), true);
   }
 });
 

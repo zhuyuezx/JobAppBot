@@ -63,7 +63,7 @@ If you applied outside the tool, click the **✓ Mark submitted** icon in the co
 This records it in Applications as **Manually tracked**, with the time you marked it,
 without starting automation. You can also mark a paused or failed application submitted
 from Applications; queued or running attempts must finish first. **Unfinished only**
-hides submitted, already-applied, and skipped entries. Marking a paused application
+hides submitted, already-applied, unavailable, and skipped entries. Marking a paused application
 submitted closes its outstanding questions and preserves its provider and history.
 The adjacent **⊘** and tag icons let you mark/clear **Not suitable** and edit tags
 without expanding the row. See [suitability and editable tags](JOB_REVIEW.md) for
@@ -92,8 +92,8 @@ python3 -m jobFilter apply worker --once
 Codex receives the applicant context and the local MCP tools for each run. Its personal
 configuration is not changed. Shell tools and web search are disabled during application
 filling; the browser provides the live page. Each run has a timeout, cancellation handling,
-a fresh claim token and screenshot path. Cancellation stops Codex and leaves the tab open;
-already completed page actions cannot be undone by cancelling.
+a fresh claim token and screenshot path. **Stop** (or **Delete**) in Applications cancels the claim, which stops Codex and leaves
+the tab open; already completed page actions cannot be undone by stopping.
 
 Official references: [Codex authentication](https://learn.chatgpt.com/docs/auth),
 [scripted Codex runs](https://learn.chatgpt.com/docs/non-interactive-mode),

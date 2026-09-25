@@ -42,6 +42,7 @@ class IntegrationTests(unittest.TestCase):
                         patch.object(profile, "load_answers", return_value=[]),
                         patch.object(profile, "resume_path", return_value=None),
                         patch.object(profile, "resume_text", return_value=""),
+                        patch.object(profile, "COVER_LETTER_DIR", self.root / "cover_letter"),
                         patch.object(application_state, "APPLY_DIR", self.root / "apply"),
                         patch.object(apply_engine, "SKILL_PATH", self.root / "skill.md")]
         for p in self.patches:

@@ -18,7 +18,7 @@ APPLY_DIR = Path(__file__).resolve().parent.parent / "data" / "apply"
 RESULT_SCHEMA = {
     "type": "object",
     "properties": {
-        "status": {"type": "string", "enum": ["review_ready", "needs_answer", "needs_login", "captcha", "already_applied", "failed"]},
+        "status": {"type": "string", "enum": ["review_ready", "needs_answer", "needs_login", "captcha", "already_applied", "unavailable", "failed"]},
         "summary": {"type": "string", "description": "What was filled, what is left, and any blocker. Never include passwords or authentication secrets."},
         "page_url": {"type": "string", "description": "URL of the tab where the application currently is."},
         "unanswered_questions": {
@@ -37,9 +37,10 @@ RESULT_SCHEMA = {
 }
 
 
-def work_directory(job_id: str) -> Path:
+def work_directory(job_id: str, create: bool = True) -> Path:
     d = APPLY_DIR / re.sub(r"[^A-Za-z0-9_.-]+", "_", job_id)[:120]
-    d.mkdir(parents=True, exist_ok=True)
+    if create:
+        d.mkdir(parents=True, exist_ok=True)
     return d
 
 
@@ -56,8 +57,13 @@ def structured_result(event):
 
 def claim_application(store, job_id):
     # Prepare local context before claiming, so a bad profile cannot strand a job.
+    current = store.get_application(job_id)
+    if not current:
+        raise ValueError("Unknown application")
+    resume = profile.application_resume(current["job"], (current.get("settings") or {}).get("resume"))
     context = {"profile": profile.load_profile(), "answer_bank": profile.load_answers(),
-               "resume_path": str(profile.resume_path() or ""), "resume_text": profile.resume_text()}
+               "resume_path": str(resume["path"] or ""), "resume_text": resume["text"],
+               "resume_version": f"{resume['version'].upper()} ({resume['reason']})"}
     work = work_directory(job_id)
     with store.conn:
         store.conn.execute("BEGIN IMMEDIATE")

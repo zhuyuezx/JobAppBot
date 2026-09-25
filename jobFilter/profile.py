@@ -3,8 +3,9 @@
 Files:
     setup/profile.json          structured facts, see setup/profile.template.json   (local, ignored)
     setup/answers.json          [{id, question, answer, updated}] reused across applications (local, ignored)
-    setup/resume/*.pdf          the file to upload; newest is used                   (local, ignored)
-    data/profile/resume.txt     cached text extraction of the resume                 (local)
+    setup/resume/*.pdf          resumes to upload, versioned by name (*_SDE_*, *_MLE_*) (local, ignored)
+    setup/cover_letter/*.docx   cover letter templates, versioned the same way      (local, ignored)
+    data/profile/resume*.txt    cached text extraction of each resume version        (local)
     data/profile/settings.json  engine settings such as the model                    (local)
 """
 from __future__ import annotations
@@ -24,9 +25,11 @@ PROFILE_PATH = SETUP_DIR / "profile.json"
 ANSWERS_PATH = SETUP_DIR / "answers.json"
 RESUME_TEXT_PATH = PROFILE_DIR / "resume.txt"
 RESUME_DIR = SETUP_DIR / "resume"
+COVER_LETTER_DIR = SETUP_DIR / "cover_letter"
 SETTINGS_PATH = PROFILE_DIR / "settings.json"
 DEFAULT_SETTINGS: dict[str, Any] = {"engine": CLAUDE, "model": "opus", "max_turns": 120,
-                                  "codex_model": "gpt-5.6-luna", "codex_reasoning_effort": "", "codex_timeout": 900}
+                                  "codex_model": "gpt-5.6-luna", "codex_reasoning_effort": "", "codex_timeout": 900,
+                                  "resume": "auto"}
 MODEL_CHOICES = ["opus", "sonnet", "haiku"]
 TEMPLATE_PATH = SETUP_DIR / "profile.template.json"
 
@@ -105,27 +108,91 @@ def delete_answer(answer_id: int) -> bool:
 
 
 # ----- resume --------------------------------------------------------------
-def resume_path() -> Optional[Path]:
-    if not RESUME_DIR.exists():
-        return None
-    files = sorted(RESUME_DIR.glob("*.pdf"), key=lambda p: p.stat().st_mtime, reverse=True)
-    return files[0] if files else None
+# One resume per job category, told apart by a version word in the file name
+# (Resume_Jason_Zhu_SDE_2026-08-12.pdf, Resume_Jason_Zhu_MLE_2026-09-23.pdf).
+# A PDF without one counts as the default (SDE) resume. A job uses the version
+# whose rule its title matches; a version without a PDF of its own falls back
+# to the default resume.
+DEFAULT_RESUME = "sde"
+RESUME_RULES = {
+    "mle": re.compile(r"\b(machine[- ]learning|ml|mle|mlops|ai|genai|artificial intelligence|deep learning|llms?|nlp|"
+                      r"natural language|computer vision|perception|agentic|data scien(ce|tist)|"
+                      r"applied scien(ce|tist)|research (engineer|scientist))\b", re.I),
+}
+RESUME_VERSIONS = (DEFAULT_RESUME, *RESUME_RULES)
+RESUME_CHOICES = ("auto", *RESUME_VERSIONS)
+# "AI-native" / "AI-first" describe the company, not the role.
+_AI_DESCRIPTOR = re.compile(r"\bAI[- ](native|first|powered|enabled|driven)\b", re.I)
 
 
-def resume_text(refresh: bool = False) -> str:
-    path = resume_path()
+def validate_resume_choice(choice: Any) -> str:
+    choice = str(choice or "auto").strip().lower()
+    if choice not in RESUME_CHOICES:
+        raise ValueError(f"resume must be one of: {', '.join(RESUME_CHOICES)}")
+    return choice
+
+
+def job_resume(job: dict[str, Any], choice: Optional[str] = "auto") -> tuple[str, str]:
+    """(version, reason): the version the user chose, else the first rule the job title matches."""
+    choice = validate_resume_choice(choice)
+    if choice != "auto":
+        return choice, "chosen when the application was started"
+    title = _AI_DESCRIPTOR.sub(" ", job.get("title") or "")
+    for version, rule in RESUME_RULES.items():
+        match = rule.search(title)
+        if match:
+            return version, f'title mentions "{match.group(0)}"'
+    return DEFAULT_RESUME, "title matches no other resume version"
+
+
+def file_version(path: Path) -> str:
+    """Version named in the file name as a separate word (_MLE_, -mle, " MLE"), else the default."""
+    words = re.split(r"[^a-z0-9]+", path.stem.lower())
+    return next((v for v in RESUME_VERSIONS if v in words), DEFAULT_RESUME)
+
+
+def _newest(folder: Path, pattern: str, version: str) -> Optional[Path]:
+    files = [p for p in folder.glob(pattern) if not p.name.startswith("~$") and file_version(p) == version] \
+        if folder.is_dir() else []   # ~$ files are Word's lock files for an open document
+    return max(files, key=lambda p: p.stat().st_mtime, default=None)
+
+
+def resume_path(version: Optional[str] = None) -> Optional[Path]:
+    """Newest PDF of that resume version, falling back to the default resume."""
+    return _newest(RESUME_DIR, "*.pdf", version or DEFAULT_RESUME) or _newest(RESUME_DIR, "*.pdf", DEFAULT_RESUME)
+
+
+def cover_letter_template(version: Optional[str] = None) -> Optional[Path]:
+    """Newest Word template of that version in setup/cover_letter/, falling back to the default one."""
+    return (_newest(COVER_LETTER_DIR, "*.docx", version or DEFAULT_RESUME)
+            or _newest(COVER_LETTER_DIR, "*.docx", DEFAULT_RESUME))
+
+
+def application_resume(job: dict[str, Any], choice: Optional[str] = "auto") -> dict[str, Any]:
+    """Resume version, file and text for one job's application."""
+    version, reason = job_resume(job, choice)
+    path = resume_path(version)
+    if path and file_version(path) != version:
+        reason += f"; setup/resume/ has no *_{version.upper()}_* PDF, so the default resume is used"
+    return {"version": version, "reason": reason, "path": path, "text": resume_text(path=path) if path else ""}
+
+
+def resume_text(refresh: bool = False, path: Optional[Path] = None) -> str:
+    path = path or resume_path()
     if not path:
         return ""
-    if RESUME_TEXT_PATH.exists() and not refresh and RESUME_TEXT_PATH.stat().st_mtime >= path.stat().st_mtime:
-        return RESUME_TEXT_PATH.read_text()
+    version = file_version(path)
+    cache = RESUME_TEXT_PATH if version == DEFAULT_RESUME else RESUME_TEXT_PATH.with_name(f"resume.{version}.txt")
+    if cache.exists() and not refresh and cache.stat().st_mtime >= path.stat().st_mtime:
+        return cache.read_text()
     try:
         import fitz  # PyMuPDF, optional
     except ImportError:
         return ""
     doc = fitz.open(path)
     text = reflow_resume("\n".join(page.get_text() for page in doc))
-    PROFILE_DIR.mkdir(parents=True, exist_ok=True)
-    RESUME_TEXT_PATH.write_text(text)
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text(text)
     return text
 
 
@@ -145,14 +212,25 @@ def reflow_resume(raw: str) -> str:
     frags: list[str] = []
     in_bullet = False
     prev_len = 0
+    lines = raw.splitlines()
 
     def flush() -> None:
         nonlocal frags, in_bullet
         if in_bullet and frags:
-            out.append("• " + " ".join(f.strip() for f in frags if f.strip()))
+            text = ""
+            for f in (f.strip() for f in frags if f.strip()):
+                # A line broken after a hyphen ("hot-" / "swaps") joins without a space.
+                text += f if re.search(r"\w-$", text) else (" " + f if text else f)
+            out.append("• " + text)
         frags, in_bullet = [], False
 
-    for line in raw.splitlines():
+    def dates_follow(i: int) -> bool:
+        """The next non-blank line is only a date range, as LaTeX PDFs put it under an entry title."""
+        nxt = next((l.strip() for l in lines[i + 1:] if l.strip()), "")
+        m = _DATE_RE.match(nxt)
+        return bool(m) and len(nxt) - m.end() <= 12   # room for " (Expected)"
+
+    for i, line in enumerate(lines):
         stripped = re.sub(r"[ \t]{2,}", "  ", line).strip()
         if not stripped:
             flush(); prev_len = 0
@@ -164,7 +242,7 @@ def reflow_resume(raw: str) -> str:
             frags = [m.group(1)] if m.group(1).strip() else []
             prev_len = len(m.group(1)) if frags else 999   # 999: next line is the first fragment
             continue
-        is_header = bool(_DATE_RE.search(stripped))
+        is_header = bool(_DATE_RE.search(stripped)) or dates_follow(i)
         continues = in_bullet and not is_header and (prev_len >= 80 or stripped[:1].islower() or stripped[:1] in "(,;&")
         if continues:
             frags.append(stripped)
@@ -203,6 +281,8 @@ def application_settings(updates: dict[str, Any]) -> dict[str, Any]:
         data["codex_reasoning_effort"] = validate_thinking_level(updates["codex_reasoning_effort"])
     if "codex_timeout" in updates:
         data["codex_timeout"] = max(30, min(3600, int(updates["codex_timeout"])))
+    if "resume" in updates:
+        data["resume"] = validate_resume_choice(updates["resume"])
     return data
 
 
@@ -220,4 +300,8 @@ def status() -> dict[str, Any]:
         "answers": len(load_answers()),
         "resume": str(p) if p else None,
         "resume_text_chars": len(resume_text()) if p else 0,
+        # Versions with their own PDF; the others fall back to the default resume.
+        "resume_versions": {v: str(f) if (f := _newest(RESUME_DIR, "*.pdf", v)) else None for v in RESUME_RULES},
+        "cover_letter_templates": {v: str(f) if (f := _newest(COVER_LETTER_DIR, "*.docx", v)) else None
+                                   for v in RESUME_VERSIONS},
     }

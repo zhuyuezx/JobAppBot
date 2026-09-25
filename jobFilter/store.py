@@ -110,7 +110,8 @@ def _iso() -> str:
 NORM_KEY_VERSION = 3  # 2: company+title+location; 3: canonical employer requisition URLs
 
 APP_STATUSES = ("queued", "running", "review_ready", "needs_answer", "needs_login", "captcha",
-                "already_applied", "failed", "submitted", "skipped")
+                "already_applied", "unavailable", "failed", "submitted", "skipped")
+ACTIVE_STATUSES = ("queued", "running")
 
 
 class Store:
@@ -282,6 +283,12 @@ class Store:
         self.conn.commit()
         return self.get(job_id)
 
+    def duplicate_candidates(self) -> list[dict[str, Any]]:
+        """Every visible job with its application status, for cross-source duplicate tagging."""
+        return [dict(r) for r in self.conn.execute(
+            "SELECT j.id, j.via, j.company, j.title, j.location, j.first_seen, j.apply_url, a.status AS app_status "
+            "FROM jobs j LEFT JOIN applications a ON a.job_id = j.id WHERE j.filter_reason IS NULL").fetchall()]
+
     def count(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
 
@@ -410,6 +417,42 @@ class Store:
                 (job_id, now, now, now, note))
             self.conn.execute("UPDATE questions SET status='superseded' WHERE job_id=? AND status='open'", (job_id,))
         return self.get_application(job_id)
+
+    def mark_unavailable(self, job_id: str, note: Optional[str] = None) -> dict[str, Any]:
+        """Record that the posting is closed (or was applied to elsewhere). Stop an active attempt first."""
+        with self.conn:
+            self.conn.execute("BEGIN IMMEDIATE")
+            if not self.get(job_id):
+                raise ValueError("Unknown job")
+            current = self.get_application(job_id)
+            if current and current["status"] in ACTIVE_STATUSES:
+                raise ValueError("Stop the active application attempt before marking the job unavailable.")
+            now = _iso()
+            self.conn.execute(
+                """INSERT INTO applications (job_id, status, engine, created_at, updated_at, note, summary)
+                   VALUES (?, 'unavailable', 'manual', ?, ?, ?, 'Marked unavailable by you.')
+                   ON CONFLICT(job_id) DO UPDATE SET status='unavailable', updated_at=excluded.updated_at,
+                   summary=excluded.summary, note=COALESCE(excluded.note, applications.note)""",
+                (job_id, now, now, note))
+            self.conn.execute("UPDATE questions SET status='superseded' WHERE job_id=? AND status='open'", (job_id,))
+        return self.get_application(job_id)
+
+    def clear_unavailable(self, job_id: str) -> Optional[dict[str, Any]]:
+        """Undo the unavailable mark: a record that only held the mark goes away; an attempt becomes skipped."""
+        current = self.get_application(job_id)
+        if not current or current["status"] not in ("unavailable", "already_applied"):
+            raise ValueError("This job is not marked unavailable.")
+        if current["engine"] == "manual":
+            self.delete_application(job_id)
+            return None
+        self.update_application(job_id, status="skipped", summary="Unavailable mark cleared. Run again to retry.")
+        return self.get_application(job_id)
+
+    def delete_application(self, job_id: str) -> bool:
+        """Forget an application and its questions. The job itself stays."""
+        with self.conn:
+            self.conn.execute("DELETE FROM questions WHERE job_id=?", (job_id,))
+            return self.conn.execute("DELETE FROM applications WHERE job_id=?", (job_id,)).rowcount > 0
 
     def update_application(self, job_id: str, **fields: Any) -> None:
         if "status" in fields and fields["status"] not in APP_STATUSES:

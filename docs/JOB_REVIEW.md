@@ -1,8 +1,11 @@
 # Job suitability and editable tags
 
-The collapsed row in **Jobs** and **Applications** has three quick actions:
+The collapsed row in **Jobs** and **Applications** has four quick actions:
 
 - **✓ Mark submitted:** record a submission without launching automation.
+- **⊖ Mark unavailable / clear:** the posting is closed or you already applied.
+  A running attempt is stopped first. The agent sets the same state when it finds
+  a closed posting (`unavailable`) or an "already applied" message (`already_applied`).
 - **⊘ Mark not suitable / clear:** toggle a manual rejection. Clearing it sets
   **Needs review**, so an automatic rejection does not immediately restore it.
 - **Tag icon:** edit the conclusion, new-grad fit, sponsorship, citizenship or
@@ -28,7 +31,8 @@ Original screening evidence stays available in the expanded job details.
 **Hide not suitable** uses the effective conclusion, including your override.
 Existing search-rule exclusions remain hidden as before. Suitability is separate
 from application progress: editing tags never starts, cancels, submits, or deletes
-an application. Active attempts must finish before they can be marked submitted.
+an application, and a pending application stays pinned in Applications even when
+its job is marked not suitable. Active attempts must finish before they can be marked submitted.
 
 Implementation: `jobFilter/suitability.py` defines the three states and precedence.
 `POST /api/jobs/review` accepts `job_id` and any of `conclusion` (a state or `null`

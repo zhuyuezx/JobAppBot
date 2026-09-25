@@ -5,22 +5,24 @@
 Jobs:          GET /api/dates, /api/jobs?since=24|date=YYYY-MM-DD, /api/job?id=, /api/runs
 Screening:     POST /api/screen {job_id}  (background; /api/jobs rows carry `screening`)
 Applications:  GET /api/engine, /api/applications?status=, /api/application?id=, /api/log?id=&lines=
-               POST /api/applications/queue {job_id}, /status {job_id,status,note}, /retry {job_id}
+               POST /api/applications/queue {job_id}, /status {job_id,status,note}, /retry {job_id},
+                    /stop {job_id}, /delete {job_id}, /unavailable {job_id,unavailable,note}
                POST /api/questions/answer {id, answer, save}
 Profile:       GET/POST /api/profile, GET/POST /api/settings {model,max_turns}, GET /api/answers, POST /api/answers {question,answer}, POST /api/answers/delete {id}
-Files:         GET /api/file?path=   (png/txt under data/apply only)
+Files:         GET /api/file?path=   (screenshots, logs, cover letters under data/apply only)
 """
 from __future__ import annotations
 
 import json
 import mimetypes
+import shutil
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from jobFilter import apply_engine, profile as prof
-from jobFilter.store import APP_STATUSES, Store
+from jobFilter import apply_engine, cover_letter, duplicates, profile as prof
+from jobFilter.store import ACTIVE_STATUSES, APP_STATUSES, Store
 from jobFilter import application_state
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -71,8 +73,11 @@ def make_handler(store: Store, config_path: Path | None = None):
                     since = q.get("since")
                     rows = store.query(since_hours=float(since) if since else None, date=q.get("date"))
                     apps = {a["job_id"]: a["status"] for a in store.list_applications()}
+                    same = duplicates.find(rows, store.duplicate_candidates())
                     for r in rows:
                         r["app_status"] = apps.get(r["id"])
+                        r["duplicates"] = same.get(r["id"], [])
+                        r["resume_auto"] = prof.job_resume(r["job"])[0]
                     self._json(rows)
                 elif p == "/api/job":
                     row = store.get(q.get("id", ""))
@@ -93,6 +98,8 @@ def make_handler(store: Store, config_path: Path | None = None):
                     for a in apps:
                         a["open_questions"] = open_q.get(a["job_id"], 0)
                         a["review"] = store.get(a["job_id"])["review"]
+                        a["resume_version"] = _resume_label(a)
+                        a["cover_letter"] = _cover_letter(a)
                     self._json(apps)
                 elif p == "/api/application":
                     a = store.get_application(q.get("id", ""))
@@ -100,6 +107,8 @@ def make_handler(store: Store, config_path: Path | None = None):
                         return self._json({"error": "not found"}, 404)
                     a["questions"] = store.questions(job_id=a["job_id"])
                     a["review"] = store.get(a["job_id"])["review"]
+                    a["resume_version"] = _resume_label(a)
+                    a["cover_letter"] = _cover_letter(a)
                     a["log"] = _tail(a.get("log_path"), 60)
                     self._json(a)
                 elif p == "/api/log":
@@ -167,13 +176,36 @@ def make_handler(store: Store, config_path: Path | None = None):
                         return self._json({"error": f"status must be one of {APP_STATUSES}"}, 400)
                     if b["status"] == "submitted":
                         return self._json(store.mark_submitted(b["job_id"], b.get("note")))
-                    if not store.get_application(b["job_id"]):
+                    current = store.get_application(b["job_id"])
+                    if not current:
                         return self._json({"error": "unknown application"}, 404)
+                    if current["status"] in ACTIVE_STATUSES and b["status"] not in ACTIVE_STATUSES:
+                        apply_engine.stop_application(store, b["job_id"], status=b["status"])
                     fields = {"status": b["status"]}
                     if "note" in b:
                         fields["note"] = b["note"]
                     store.update_application(b["job_id"], **fields)
                     self._json(store.get_application(b["job_id"]))
+                elif p == "/api/applications/stop":
+                    self._json(apply_engine.stop_application(store, b.get("job_id", "")))
+                elif p == "/api/applications/delete":
+                    current = store.get_application(b.get("job_id", ""))
+                    if not current:
+                        return self._json({"error": "unknown application"}, 404)
+                    if current["status"] in ACTIVE_STATUSES:
+                        apply_engine.stop_application(store, current["job_id"])
+                    store.delete_application(current["job_id"])
+                    shutil.rmtree(application_state.work_directory(current["job_id"], create=False), ignore_errors=True)
+                    self._json({"deleted": True})
+                elif p == "/api/applications/unavailable":
+                    job_id = b.get("job_id", "")
+                    if not b.get("unavailable", True):
+                        self._json(store.clear_unavailable(job_id) or {"deleted": True})
+                        return
+                    current = store.get_application(job_id)
+                    if current and current["status"] in ACTIVE_STATUSES:
+                        apply_engine.stop_application(store, job_id, summary="Stopped: you marked the job unavailable.")
+                    self._json(store.mark_unavailable(job_id, b.get("note")))
                 elif p == "/api/applications/retry":
                     app = store.get_application(b["job_id"])
                     if not app or app["status"] == "running":
@@ -221,6 +253,16 @@ def make_handler(store: Store, config_path: Path | None = None):
                 self._json({"error": str(e)}, 500)
 
     return Handler
+
+
+def _resume_label(app: dict[str, Any]) -> str:
+    version, reason = prof.job_resume(app["job"], (app.get("settings") or {}).get("resume"))
+    return f"{version.upper()} · {reason}"
+
+
+def _cover_letter(app: dict[str, Any]) -> dict[str, Any]:
+    letter = cover_letter.load(app["job_id"])
+    return {k: letter[k] for k in ("status", "path", "reason", "notes") if k in letter}
 
 
 def _tail(path: str | None, n: int) -> list[str]:

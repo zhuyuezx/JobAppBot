@@ -233,11 +233,12 @@ claude -p "<task prompt>" --chrome --output-format stream-json --verbose \
 - The prompt (`build_prompt`) contains the job, the full text of the
   `apply-job` skill (`.claude/skills/apply-job/SKILL.md`: workflow, per-site
   notes, learned lessons), the profile JSON, the answer bank, the resume text
-  and path, and the user's rules (never Submit, don't guess, stop on
+  and path for this job's resume version, the cover letter written for this
+  job (`cover_letter.py`), and the user's rules (never Submit, don't guess, stop on
   CAPTCHA/login). The skill is also discoverable by interactive Claude Code
   sessions in this repo. `--json-schema` forces the final answer into
   `RESULT_SCHEMA`: `status` in {review_ready, needs_answer, needs_login,
-  captcha, already_applied, failed}, `summary`, `page_url`,
+  captcha, already_applied, unavailable, failed}, `summary`, `page_url`,
   `unanswered_questions[]`, `screenshot_path`.
 - The result's `lessons[]` (new reusable facts about the site) are appended to
   the skill's "Learned from runs" section with date and company; exact
@@ -259,9 +260,10 @@ claude -p "<task prompt>" --chrome --output-format stream-json --verbose \
 State machine per application:
 
 ```
-queued -> running -> review_ready | needs_answer | needs_login | captcha | already_applied | failed
+queued -> running -> review_ready | needs_answer | needs_login | captcha | already_applied | unavailable | failed
 needs_answer --(all questions answered)--> queued (resume)
-review_ready --(user)--> submitted;  any --(user)--> skipped;  failed --(user)--> queued
+review_ready --(user)--> submitted;  any --(user)--> skipped | unavailable;  failed --(user)--> queued
+queued | running --(user: Stop)--> failed;  any --(user: Delete)--> no record
 ```
 
 Settings: `data/profile/settings.json` holds `model` (default `opus`; any
@@ -291,7 +293,9 @@ jobFilter/static/index.html  page markup
 jobFilter/static/app.js     frontend behavior
 jobFilter/static/styles.css frontend styling
 jobFilter/scheduler.py     foreground interval loop
-jobFilter/profile.py       setup/profile.json, setup/answers.json, resume text
+jobFilter/profile.py       setup/profile.json, setup/answers.json, resume versions and text
+jobFilter/cover_letter.py  tailored cover letter PDF from a Word template, written before each application
+jobFilter/duplicates.py    tags one posting listed by two sources (company + title + compatible location)
 .claude/skills/apply-job/  the form-filling skill Claude follows and extends
 setup/                     user setup (gitignored) + tracked templates
 jobFilter/descriptions.py  description fetchers per ATS + years-of-experience inference

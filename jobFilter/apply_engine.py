@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from jobFilter import profile as prof
-from jobFilter.store import Store
+from jobFilter.store import ACTIVE_STATUSES, Store
 from jobFilter.application_state import RESULT_SCHEMA, structured_result, work_directory
 from jobFilter.providers import CLAUDE, CODEX, validate_engine
 
@@ -111,12 +111,12 @@ def effective_settings() -> dict[str, Any]:
 
 # ----- prompt --------------------------------------------------------------
 
-def build_prompt(app: dict[str, Any], work_dir: Path) -> str:
+def build_prompt(app: dict[str, Any], work_dir: Path, letter: Optional[dict[str, Any]] = None) -> str:
     job = app["job"]
+    letter = letter or {}
     profile = prof.load_profile()
     answers = prof.load_answers()
-    resume = prof.resume_path()
-    resume_txt = prof.resume_text()
+    resume = prof.application_resume(job, (app.get("settings") or {}).get("resume"))
     rules = profile.pop("rules_for_claude", [])
     bank = "\n".join(f"- Q: {a['question']}\n  A: {a['answer']}" for a in answers) or "(empty)"
     skill = load_skill()
@@ -127,7 +127,9 @@ JOB
 - Company: {job.get('company')}
 - Apply URL: {job.get('apply_url') or app.get('hc_url')}
 - Location: {job.get('location')}
-- Resume file to upload: {resume or '(no resume file found)'}
+- Resume file to upload: {resume['path'] or '(no resume file found)'}
+- Resume version: {resume['version'].upper()} ({resume['reason']})
+- Cover letter file to upload: {letter['path'] if letter.get('status') == 'ok' else '(none: ' + (letter.get('reason') or 'not written') + ')'}
 
 At the end, return the structured result. In `lessons`, list only new reusable facts about this site's form that the SKILL does not already say (or an empty list). In `screenshot_path`, give the path returned by the screenshot tool; do not copy or convert files.
 
@@ -144,7 +146,10 @@ At the end, return the structured result. In `lessons`, list only new reusable f
 {bank}
 
 ===== RESUME TEXT =====
-{resume_txt[:6000]}
+{resume['text'][:6000]}
+
+===== COVER LETTER TEXT =====
+{letter.get('text') or '(none)'}
 """
 
 
@@ -163,6 +168,41 @@ def resume_message(questions: list[dict[str, Any]], work_dir: Path, after: Optio
 
 
 # ----- running -------------------------------------------------------------
+# Claude processes of running applications, so the UI can stop one.
+_processes: dict[str, subprocess.Popen] = {}
+_processes_lock = threading.Lock()
+STOP_SUMMARY = "Stopped by you. Run again to retry, or delete the application."
+
+
+def stop_application(store: Store, job_id: str, status: str = "failed", summary: str = STOP_SUMMARY) -> dict[str, Any]:
+    """End a queued or running attempt: record `status`, then end its process.
+
+    A Claude run is terminated here. A Codex run sees that its claim is no longer
+    running and stops its own process. Either way the run's late result is dropped.
+    Also clears a run left 'running' by a restart, where no process exists.
+    """
+    app = store.get_application(job_id)
+    if not app:
+        raise ValueError("Unknown application")
+    if app["status"] not in ACTIVE_STATUSES:
+        raise ValueError("Only a queued or running application can be stopped.")
+    store.update_application(job_id, status=status, summary=summary)
+    if app.get("log_path") and Path(app["log_path"]).parent.exists():
+        with Path(app["log_path"]).open("a") as log:
+            log.write(f"[stopped] {time.strftime('%Y-%m-%d %H:%M:%S')} {summary}\n")
+    with _processes_lock:
+        proc = _processes.get(job_id)
+    if proc and proc.poll() is None:
+        proc.terminate()
+        threading.Timer(5, lambda: proc.poll() is None and proc.kill()).start()
+    return store.get_application(job_id)
+
+
+def _still_running(store: Store, job_id: str) -> bool:
+    current = store.get_application(job_id)
+    return bool(current) and current["status"] == "running"
+
+
 def _log_event(evt: dict[str, Any], log) -> None:
     t = evt.get("type")
     if t == "assistant":
@@ -202,9 +242,17 @@ def run_application(store: Store, app: dict[str, Any]) -> dict[str, Any]:
     # Resume the same Claude session when the user answered questions or finished a login/CAPTCHA handoff;
     # otherwise (first run, or a retry after a hard failure) start fresh.
     resuming = bool(app.get("session_id")) and (bool(answered) or last_status in ("needs_login", "captcha"))
-    prompt = resume_message(answered, work_dir, after=last_status) if resuming else build_prompt(app, work_dir)
-
     settings = app.get("settings") or effective_settings()
+    if resuming:
+        prompt = resume_message(answered, work_dir, after=last_status)
+    else:  # a resumed session already has its cover letter
+        from jobFilter import cover_letter
+        with log_path.open("a") as log:
+            letter = cover_letter.prepare(app, settings, log=lambda line: (log.write(line + "\n"), log.flush()))
+        prompt = build_prompt(app, work_dir, letter)
+        if not _still_running(store, job_id):   # stopped or deleted while the letter was written
+            return {"status": "stopped", "summary": STOP_SUMMARY}
+
     cmd = [claude, "-p", prompt, "--chrome", "--output-format", "stream-json", "--verbose",
            "--json-schema", json.dumps(RESULT_SCHEMA), "--max-turns", str(settings["max_turns"]),
            "--model", settings["model"],
@@ -218,21 +266,29 @@ def run_application(store: Store, app: dict[str, Any]) -> dict[str, Any]:
     with log_path.open("a") as log:
         log.write(f"\n===== {'resume' if resuming else 'start'} {time.strftime('%Y-%m-%d %H:%M:%S')} model={settings['model']} =====\n")
         proc = subprocess.Popen(cmd, cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        for line in proc.stdout:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                evt = json.loads(line)
-            except ValueError:
-                log.write(line + "\n"); log.flush()
-                continue
-            if evt.get("session_id"):
-                session_id = evt["session_id"]
-            _log_event(evt, log)
-            if evt.get("type") == "result":
-                result_evt = evt
-        proc.wait()
+        with _processes_lock:
+            _processes[job_id] = proc
+        try:
+            for line in proc.stdout:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    evt = json.loads(line)
+                except ValueError:
+                    log.write(line + "\n"); log.flush()
+                    continue
+                if evt.get("session_id"):
+                    session_id = evt["session_id"]
+                _log_event(evt, log)
+                if evt.get("type") == "result":
+                    result_evt = evt
+            proc.wait()
+        finally:
+            with _processes_lock:
+                _processes.pop(job_id, None)
+    if not _still_running(store, job_id):   # stopped or deleted: keep what the user recorded
+        return {"status": "stopped", "summary": STOP_SUMMARY}
 
     out = structured_result(result_evt)
     status = out.get("status") or "failed"
