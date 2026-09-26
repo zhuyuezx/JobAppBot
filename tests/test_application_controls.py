@@ -25,6 +25,28 @@ def review_ready():
 
 
 class DuplicateTests(unittest.TestCase):
+    def test_snap_finance_us_state_level_listing_matches_city_listing(self):
+        base = {'title': 'Software Engineer - Applied AI', 'company': 'Snap Finance',
+                'location': 'West Valley City, UT', 'via': 'simplify', 'first_seen': '2026-09-25'}
+        rows = [{'id': 'original', **base},
+                {**base, 'id': 'copy', 'via': 'startupjobs', 'company': 'Snap Finance US',
+                 'location': 'Utah, U.S.', 'first_seen': '2026-09-26'},
+                {**base, 'id': 'other-state', 'via': 'startupjobs', 'location': 'Texas, U.S.'},
+                {**base, 'id': 'other-city', 'via': 'startupjobs', 'location': 'Provo, UT'},
+                {**base, 'id': 'other-role', 'via': 'startupjobs', 'title': 'Senior Software Engineer - Applied AI'},
+                {**base, 'id': 'same-source'},
+                {**base, 'id': 'other-company', 'via': 'startupjobs', 'company': 'Snap'}]
+        found = duplicates.find(rows, rows)
+        self.assertEqual([r['id'] for r in found['original']], ['copy'])
+        self.assertIn('original', [r['id'] for r in found['copy']])
+        self.assertNotIn('other-state', found)
+        self.assertNotIn('other-role', found)
+        self.assertNotIn('other-company', found)
+        self.assertEqual(duplicates.company_key('Snap Finance U.S.'), 'snap finance')
+        self.assertEqual(duplicates.cities('Utah, U.S.'), set())
+        self.assertFalse(duplicates._compatible_location('Portland, OR', 'Portland, ME'))
+        self.assertTrue(duplicates._compatible_location('Washington, DC', 'District of Columbia, U.S.'))
+
     def test_same_posting_from_other_sources_is_tagged(self):
         rows = [
             {"id": "ag", "via": "applyguy", "company": "SeatGeek", "title": "Software Engineer - New Grad", "location": "New York City, NY", "first_seen": "2026-09-23"},
