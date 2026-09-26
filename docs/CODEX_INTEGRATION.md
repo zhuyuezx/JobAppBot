@@ -179,6 +179,13 @@ browser. Claude records and sessions are unaffected.
 
 ## Verification
 
+After changing Python backend files, restart the UI service once no applications
+are queued or running: `bin/jobfilter ui stop`, then `bin/jobfilter ui start`.
+A browser refresh only reloads the frontend. An error such as
+`module 'jobFilter.profile' has no attribute 'availability_instructions'` after
+an update can mean the server still has an older Python module in memory.
+After restarting, use **Run again** on the failed application.
+
 ```sh
 python3 -B -m unittest discover -s tests -v
 python3 -B tests/live_screen.py  # opt-in; consumes subscription quota
