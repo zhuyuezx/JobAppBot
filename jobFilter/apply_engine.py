@@ -148,8 +148,11 @@ At the end, return the structured result. In `lessons`, list only new reusable f
 ===== ANSWER BANK =====
 {bank}
 
-===== RESUME TEXT =====
+===== RESUME TEXT (the uploaded {resume['version'].upper()} file) =====
 {resume['text'][:6000]}
+
+===== ROLE DESCRIPTIONS (for experience fields; the same for every resume version) =====
+{prof.role_descriptions_text()[:8000]}
 
 ===== COVER LETTER TEXT =====
 {letter.get('text') or '(none)'}

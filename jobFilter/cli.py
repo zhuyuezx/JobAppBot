@@ -228,6 +228,7 @@ def cmd_profile(args) -> int:
     if args.action == "init":
         path = prof.init_profile(overwrite=args.force)
         prof.resume_text(refresh=True)
+        prof.role_descriptions(refresh=True)
         log(f"profile: {path}\nresume: {prof.resume_path()}\nedit the JSON or use the Profile tab in the UI")
     else:
         print(json.dumps(prof.status(), indent=2))

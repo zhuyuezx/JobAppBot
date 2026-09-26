@@ -63,7 +63,8 @@ def claim_application(store, job_id):
     resume = profile.application_resume(current["job"], (current.get("settings") or {}).get("resume"))
     context = {"profile": profile.load_profile(), "answer_bank": profile.load_answers(),
                "resume_path": str(resume["path"] or ""), "resume_text": resume["text"],
-               "resume_version": f"{resume['version'].upper()} ({resume['reason']})"}
+               "resume_version": f"{resume['version'].upper()} ({resume['reason']})",
+               "role_descriptions": profile.role_descriptions_text()}
     work = work_directory(job_id)
     with store.conn:
         store.conn.execute("BEGIN IMMEDIATE")

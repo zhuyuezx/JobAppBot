@@ -19,6 +19,7 @@ class ResumeVersionTests(unittest.TestCase):
         self.resumes.mkdir()
         self.patches = [patch.object(profile, "RESUME_DIR", self.resumes),
                         patch.object(profile, "RESUME_TEXT_PATH", self.root / "resume.txt"),
+                        patch.object(profile, "ROLES_PATH", self.root / "role_descriptions.json"),
                         patch.object(profile, "SETTINGS_PATH", self.root / "settings.json"),
                         patch.object(profile, "resume_text", side_effect=lambda refresh=False, path=None: f"text of {(path or profile.resume_path()).name}"),
                         patch.object(profile, "load_profile", return_value={"name": "Alex Example"}),
@@ -125,6 +126,91 @@ class ResumeVersionTests(unittest.TestCase):
         self.assertEqual(task["resume_version"], "SDE (chosen when the application was started)")
         with self.assertRaises(ValueError):
             application_state.claim_application(store, "missing")
+
+
+    def test_role_descriptions_keep_the_most_complete_wording_and_rebuild_only_on_change(self):
+        self.assertEqual([(e["kind"], e["heading"], e["dates"], len(e["bullets"])) for e in profile.resume_entries(WORD_TEXT)],
+                         [("experience", "Backend Developer Intern, ByteDance, Seattle", "Jun 2026 – Sep 2026", 4),
+                          ("projects", "Main Developer & Maintainer, DiagWiki", "Dec 2025 – Present", 2)])
+        self.assertEqual([(e["kind"], e["heading"], e["dates"], len(e["bullets"])) for e in profile.resume_entries(LATEX_TEXT)],
+                         [("experience", "Backend Developer Intern, ByteDance, Seattle", "Jun 2026 – Sep 2026", 2),
+                          ("projects", "Research Intern, DGP Lab", "Sep 2023 – Apr 2025", 1),
+                          ("projects", "Main Developer & Maintainer, DiagWiki", "Dec 2025 – Present", 2)])
+
+        texts = {"Resume_SDE.pdf": WORD_TEXT, "Resume_MLE.pdf": LATEX_TEXT}
+        self.pdf("Resume_SDE.pdf", age=100)
+        mle = self.pdf("Resume_MLE.pdf")
+        with patch.object(profile, "resume_text", side_effect=lambda refresh=False, path=None: texts[path.name]) as read:
+            entries = profile.role_descriptions()
+            self.assertEqual([(e["heading"], e["from"], len(e["bullets"])) for e in entries],
+                             [("Backend Developer Intern, ByteDance, Seattle", "sde", 4),   # the MLE PDF shows only 2
+                              ("Main Developer & Maintainer, DiagWiki", "mle", 2),        # MLE wording is longer
+                              ("Research Intern, DGP Lab", "mle", 1)])                    # only on the MLE resume
+            calls = read.call_count
+            self.assertEqual(profile.role_descriptions(), entries)
+            self.assertEqual(read.call_count, calls, "stored: no resume is read again")
+            texts["Resume_MLE.pdf"] = LATEX_TEXT.replace("• Built the MLE bullet.", "• Built the MLE bullet.\n• A new bullet.")
+            os.utime(mle, (time.time() + 5,) * 2)   # the MLE resume changed
+            profile.role_descriptions()
+            self.assertGreater(read.call_count, calls)
+        text = profile.role_descriptions_text()
+        self.assertTrue(text.startswith("JOBS (for work experience entries)\nBackend Developer Intern, ByteDance, Seattle | Jun 2026 – Sep 2026\n• Owned"))
+        self.assertIn("PROJECTS & RESEARCH\nMain Developer & Maintainer, DiagWiki", text)
+
+    def test_mle_application_prompts_carry_the_complete_role_descriptions(self):
+        texts = {"Resume.pdf": WORD_TEXT, "Resume_MLE.pdf": LATEX_TEXT}
+        self.pdf("Resume.pdf", age=100)
+        self.pdf("Resume_MLE.pdf")
+        store = Store(self.root / "jobs.db")
+        self.addCleanup(store.close)
+        job = Job.from_hit({"objectID": "ml"})
+        job.title, job.company, job.apply_url = "Machine Learning Engineer", "Example Test", "https://example.com/ml"
+        store.upsert_many([job], "test")
+        with patch.object(profile, "resume_text", side_effect=lambda refresh=False, path=None: texts[path.name]):
+            prompt = apply_engine.build_prompt(store.queue_application("ml"), self.root)
+            self.assertIn("===== RESUME TEXT (the uploaded MLE file) =====", prompt)
+            roles = prompt.split("===== ROLE DESCRIPTIONS")[1]
+            self.assertIn("• Drove resolution of an average of 2+ production incidents", roles)
+            store.delete_application("ml")
+            store.queue_application("ml", CODEX, {"codex_model": "gpt-test"})
+            self.assertIn("• Drove resolution", application_state.claim_application(store, "ml")["role_descriptions"])
+
+
+WORD_TEXT = """Yuezhexuan(Jason) Zhu
+Education
+University of California, San Diego  Sep 2025 – Jun 2027 (Expected)
+Master of Science in Computer Science | GPA: 3.89 / 4.00
+Internship
+Backend Developer Intern, ByteDance, Seattle  Jun 2026 – Sep 2026
+• Owned backend development for the Braintree payment channel serving 40M+ daily requests
+• Designed and self-tested Braintree's migration to standardized interfaces
+• Built an AI-agent E2E validation system from 1,615 test cases
+• Drove resolution of an average of 2+ production incidents weekly across Braintree, Itaú, and Payoneer
+Project & Research
+Main Developer & Maintainer, DiagWiki  Dec 2025 – Present
+• Developed a diagram-centered agentic AI tool
+• Engineered a local RAG system"""
+
+LATEX_TEXT = """Yuezhexuan (Jason) Zhu
+Education
+University of California, San Diego
+Sep 2025 – Jun 2027 (Expected)
+Technical Skills
+Languages:
+Python, C/C++
+Experience
+Backend Developer Intern, ByteDance, Seattle
+Jun 2026 – Sep 2026
+• Built an AI-agent E2E validation system from 1,615 test cases
+• Owned backend development for the Braintree payment channel
+Research & Projects
+Research Intern, DGP Lab
+Sep 2023 – Apr 2025
+• Built the MLE bullet.
+Main Developer & Maintainer, DiagWiki
+Dec 2025 – Present
+• Developed a fully local agentic AI tool that analyzes codebases and generates diagrams
+• Engineered a hybrid RAG pipeline that fuses FAISS dense retrieval with BM25 scores"""
 
 
 if __name__ == "__main__":

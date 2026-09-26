@@ -639,7 +639,8 @@ async function loadProfile() {
       : `${v.toUpperCase()} resume: none, uses the default (add a PDF named *_${v.toUpperCase()}_*.pdf to setup/resume/)`),
     ...Object.entries(status.cover_letter_templates || {}).map(([v, p]) => p ? `✓ ${v.toUpperCase()} cover letter template: ${esc(p.split('/').pop())}`
       : `${v.toUpperCase()} cover letter template: none (add *_${v.toUpperCase()}_*.docx to setup/cover_letter/)`),
-    `${answers.length} bank answers`].map(x => `<span>${x}</span>`).join('');
+    status.role_descriptions ? `✓ ${status.role_descriptions} role descriptions, the most complete wording across resume versions (data/profile/role_descriptions.json, rebuilt when a resume changes)` : '',
+    `${answers.length} bank answers`].filter(Boolean).map(x => `<span>${x}</span>`).join('');
   $('#profileText').value = JSON.stringify(profile, null, 2);
   $('#answers').innerHTML = answers.length ? '<tr><th>Question</th><th>Answer</th><th></th></tr>' + answers.map(a =>
     `<tr><td>${esc(a.question)}</td><td>${esc(a.answer)}</td><td><button class="btn" data-del="${a.id}">✕</button></td></tr>`).join('') : '<tr><td class="muted">empty</td></tr>';

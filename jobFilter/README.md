@@ -233,7 +233,9 @@ claude -p "<task prompt>" --chrome --output-format stream-json --verbose \
 - The prompt (`build_prompt`) contains the job, the full text of the
   `apply-job` skill (`.claude/skills/apply-job/SKILL.md`: workflow, per-site
   notes, learned lessons), the profile JSON, the answer bank, the resume text
-  and path for this job's resume version, the cover letter if one exists (else
+  and path for this job's resume version, the stored role descriptions (the most
+  complete wording of each job across resume versions, for experience fields),
+  the cover letter if one exists (else
   a note to stop with `needs_cover_letter` at a cover letter field;
   `cover_letter.py` then writes it and the session resumes), and the user's rules (never Submit, don't guess, stop on
   CAPTCHA/login). The skill is also discoverable by interactive Claude Code

@@ -34,7 +34,7 @@ def run_application(store, app):
             letter = cover_letter.prepare(app, settings, log=log, write=asked)
             log("Preparing browser bridge…")
             url = bridge.ensure_running()
-            context = {k: task[k] for k in ("job", "profile", "answer_bank", "resume_path", "resume_text", "resume_version", "previous_result", "page_url", "questions")}
+            context = {k: task[k] for k in ("job", "profile", "answer_bank", "resume_path", "resume_text", "resume_version", "role_descriptions", "previous_result", "page_url", "questions")}
             context["cover_letter_path"] = letter["path"] if letter["status"] == "ok" else ""
             context["cover_letter_text"] = letter.get("text", "")
             context["cover_letter_status"] = ("ready" if letter["status"] == "ok" else "not written yet"
@@ -59,8 +59,9 @@ If cover_letter_status is "not written yet" and the form has such a field, fill 
 that page, stay on it, and return status needs_cover_letter with its page_url: the run continues with
 the letter. If cover_letter_status starts with "none", leave an optional field empty; if it is
 required, fill the rest and say so in the summary. Never stop for a cover letter twice.
-resume_version says which version (SDE or MLE) was picked for this job and why; describe experience
-from that resume_text. If the posting clearly fits the other version, keep going and say so in the
+resume_version says which version (SDE or MLE) was picked for this job and why. Fill work
+experience and project descriptions from role_descriptions (the most complete wording, the same for
+every resume version), one "• " line per bullet; resume_text is the uploaded file and may be trimmed. If the posting clearly fits the other version, keep going and say so in the
 summary. Never submit the
 application: no Submit/Send/Finish click, Enter shortcut, scripted submit, or network submission.
 Use visible form controls for filling and navigation. Verify all filled fields before review_ready.

@@ -6,6 +6,8 @@ Files:
     setup/resume/*.pdf          resumes to upload, versioned by name (*_SDE_*, *_MLE_*) (local, ignored)
     setup/cover_letter/*.docx   cover letter templates, versioned the same way      (local, ignored)
     data/profile/resume*.txt    cached text extraction of each resume version        (local)
+    data/profile/role_descriptions.json  the most complete description of every job and
+                                project across resume versions; rebuilt when a resume changes (local)
     data/profile/settings.json  engine settings such as the model                    (local)
 """
 from __future__ import annotations
@@ -24,6 +26,7 @@ PROFILE_DIR = ROOT / "data" / "profile"          # local caches and settings
 PROFILE_PATH = SETUP_DIR / "profile.json"
 ANSWERS_PATH = SETUP_DIR / "answers.json"
 RESUME_TEXT_PATH = PROFILE_DIR / "resume.txt"
+ROLES_PATH = PROFILE_DIR / "role_descriptions.json"
 RESUME_DIR = SETUP_DIR / "resume"
 COVER_LETTER_DIR = SETUP_DIR / "cover_letter"
 SETTINGS_PATH = PROFILE_DIR / "settings.json"
@@ -269,6 +272,100 @@ def reflow_resume(raw: str) -> str:
     return "\n".join(out)
 
 
+# ----- role descriptions ---------------------------------------------------
+# Resume versions trim bullets to fit a page (the MLE one keeps 2 of the 4 Seattle
+# bullets), but experience fields in application forms have room for everything.
+# So forms get one stored set of role descriptions, the most complete wording of
+# each job and project across all resume versions; the version only picks the file.
+_SECTIONS = {"education": "", "technical skills": "", "skills": "", "highlights of qualifications": "",
+             "experience": "experience", "work experience": "experience", "professional experience": "experience",
+             "internship": "experience", "internships": "experience",
+             "projects": "projects", "project & research": "projects", "research & projects": "projects",
+             "projects & research": "projects", "research experience": "projects", "research": "projects"}
+
+
+def resume_entries(text: str) -> list[dict[str, Any]]:
+    """Jobs and projects with bullets in a reflowed resume: [{kind, heading, dates, bullets}].
+
+    Handles both layouts: "Title, Company  Jun 2026 – Sep 2026" on one line (Word)
+    and the dates on the line after the title (LaTeX).
+    """
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    entries: list[dict[str, Any]] = []
+    kind, current = "", None
+    for i, line in enumerate(lines):
+        if line.startswith("• "):
+            if current is not None:
+                current["bullets"].append(line[2:].strip())
+            continue
+        if line.lower() in _SECTIONS:
+            kind, current = _SECTIONS[line.lower()], None
+            continue
+        inline = _DATE_RE.search(line)
+        following = _DATE_RE.match(lines[i + 1]) if i + 1 < len(lines) else None
+        if inline and inline.start() > 0:
+            heading, dates = line[:inline.start()], line[inline.start():]
+        elif following and len(lines[i + 1]) - following.end() <= 12 and not inline:
+            heading, dates = line, lines[i + 1]
+        else:
+            if not (inline and inline.start() == 0):   # a date line belongs to the heading above
+                current = None
+            continue
+        current = {"kind": kind, "heading": heading.strip(), "dates": dates.strip(), "bullets": []}
+        if kind:
+            entries.append(current)
+    return [e for e in entries if e["bullets"]]
+
+
+def _resume_files() -> list[tuple[str, Path]]:
+    """The newest PDF of each resume version, default first."""
+    seen, out = set(), []
+    for version in RESUME_VERSIONS:
+        path = resume_path(version)
+        if path and path not in seen and file_version(path) == version:
+            seen.add(path)
+            out.append((version, path))
+    return out
+
+
+def role_descriptions(refresh: bool = False) -> list[dict[str, Any]]:
+    """The stored role descriptions: rebuilt only when a resume file changes."""
+    files = _resume_files()
+    fingerprint = [[p.name, p.stat().st_mtime, p.stat().st_size] for _, p in files]
+    if not refresh and ROLES_PATH.exists():
+        try:
+            stored = json.loads(ROLES_PATH.read_text())
+            if stored.get("fingerprint") == fingerprint:
+                return stored["entries"]
+        except ValueError:
+            pass
+    best: dict[str, dict[str, Any]] = {}
+    for version, path in files:
+        for entry in resume_entries(resume_text(path=path)):
+            key = re.sub(r"[^a-z0-9]+", " ", entry["heading"].lower()).strip()
+            size = sum(len(b) for b in entry["bullets"])
+            if key not in best or size > sum(len(b) for b in best[key]["bullets"]):
+                best[key] = {**entry, "from": version, "order": best.get(key, {}).get("order", len(best))}
+    entries = sorted(best.values(), key=lambda e: (e["kind"] != "experience", e["order"]))
+    for e in entries:
+        e.pop("order")
+    PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+    ROLES_PATH.write_text(json.dumps({"fingerprint": fingerprint, "updated": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                                      "entries": entries}, indent=2, ensure_ascii=False) + "\n")
+    return entries
+
+
+def role_descriptions_text(entries: Optional[list[dict[str, Any]]] = None) -> str:
+    entries = role_descriptions() if entries is None else entries
+    blocks = []
+    for kind, title in (("experience", "JOBS (for work experience entries)"), ("projects", "PROJECTS & RESEARCH")):
+        items = [e for e in entries if e["kind"] == kind]
+        if items:
+            blocks.append(title + "\n" + "\n\n".join(
+                f"{e['heading']} | {e['dates']}\n" + "\n".join("• " + b for b in e["bullets"]) for e in items))
+    return "\n\n".join(blocks)
+
+
 # ----- engine settings -----------------------------------------------------
 def load_settings() -> dict[str, Any]:
     data = dict(DEFAULT_SETTINGS)
@@ -318,4 +415,5 @@ def status() -> dict[str, Any]:
         "resume_versions": {v: str(f) if (f := _newest(RESUME_DIR, "*.pdf", v)) else None for v in RESUME_RULES},
         "cover_letter_templates": {v: str(f) if (f := _newest(COVER_LETTER_DIR, "*.docx", v)) else None
                                    for v in RESUME_VERSIONS},
+        "role_descriptions": len(role_descriptions()) if p else 0,
     }

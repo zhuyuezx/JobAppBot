@@ -58,6 +58,7 @@ class CoverLetterTests(unittest.TestCase):
         self.sde = docx(self.templates / "Cover_Letter_Template_SDE.docx")
         self.patches = [
             patch.object(profile, "COVER_LETTER_DIR", self.templates),
+            patch.object(profile, "ROLES_PATH", self.root / "role_descriptions.json"),
             patch.object(profile, "RESUME_DIR", self.root / "resume"),
             patch.object(profile, "load_profile", return_value={"identity": {"preferred_name": "Alex Example"},
                                                                 "preferences": {"earliest_start_date": "06-2027"}}),

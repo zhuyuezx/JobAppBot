@@ -23,6 +23,12 @@ or a space (`Resume_Jason_Zhu_MLE_2026-09-23.pdf`). A file without either word
 counts as the default (SDE) version. Cover letter templates are named the same
 way (`Cover_Letter_Template_MLE_2026-09-24.docx`).
 
+Experience descriptions typed into forms (for example Workday's Role Description)
+do not depend on the version. JobAppBot keeps the most complete wording of every
+job and project across your resumes in `data/profile/role_descriptions.json` and
+rebuilds it only when a resume file changes, so an MLE application still gets all
+four Seattle bullets even though the MLE PDF shows two.
+
 Each application picks a resume version from the job title: titles that
 mention machine learning, ML, AI, LLM, data scientist, research engineer and
 similar get the MLE resume; everything else gets the default. You can override
