@@ -41,6 +41,8 @@
   },
   "preferences": {
     "earliest_start_date": "",
+    "_earliest_start_date": "Use YYYY-MM-DD. This is availability, not the education/graduation date.",
+    "availability_note": "",
     "willing_to_relocate": true,
     "preferred_locations": [],
     "salary_expectation_text": "Open to market rate for the role and location",

@@ -13,6 +13,11 @@ resume never leave your machine.
 | `resume/*_MLE_*.pdf` | optional MLE resume, used for ML / AI job titles | |
 | `cover_letter/*_SDE_*.docx`, `cover_letter/*_MLE_*.docx` | optional Word cover letter templates, one per version | |
 
+**Availability.** Set `preferences.earliest_start_date` to `YYYY-MM-DD` and use
+`availability_note` for context, such as finishing a degree early. New and resumed
+applications use this preference for start-date questions; graduation questions
+still use the dates in `education`.
+
 The version is the word `SDE` or `MLE` in the file name, set off by `_`, `-`
 or a space (`Resume_Jason_Zhu_MLE_2026-09-23.pdf`). A file without either word
 counts as the default (SDE) version. Cover letter templates are named the same

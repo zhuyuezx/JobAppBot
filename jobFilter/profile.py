@@ -53,6 +53,20 @@ def profile_exists() -> bool:
     return PROFILE_PATH.exists()
 
 
+def availability_instructions(applicant: Optional[dict[str, Any]] = None) -> str:
+    """Current start-date preference, also refreshed when resuming an old session."""
+    preferences = (applicant if applicant is not None else load_profile()).get("preferences", {})
+    date = preferences.get("earliest_start_date")
+    if not date:
+        return ""
+    return (f"For earliest availability / earliest start date questions, use {date}, formatted as the form requires. "
+            f"Applicant's explanation: {preferences.get('availability_note') or '(none supplied)'}. "
+            "This current preference replaces older general start-date assumptions in the session or answer bank. "
+            "Do not infer availability from the resume's graduation date or change education dates to match it. "
+            "For graduation questions, use the education record. Do not choose a start date earlier than this "
+            "preference; if the form only offers earlier dates or conflicting requirements, ask the user.")
+
+
 def save_profile(profile: dict[str, Any]) -> None:
     SETUP_DIR.mkdir(parents=True, exist_ok=True)
     PROFILE_PATH.write_text(json.dumps(profile, indent=2, ensure_ascii=False) + "\n")

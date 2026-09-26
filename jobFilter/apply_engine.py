@@ -139,6 +139,9 @@ At the end, return the structured result. In `lessons`, list only new reusable f
 ===== USER RULES =====
 {chr(10).join('- ' + r for r in rules)}
 
+===== CURRENT AVAILABILITY =====
+{prof.availability_instructions(profile)}
+
 ===== PROFILE (JSON) =====
 {json.dumps(profile, indent=1, ensure_ascii=False)}
 
@@ -156,6 +159,9 @@ At the end, return the structured result. In `lessons`, list only new reusable f
 def resume_message(questions: list[dict[str, Any]], work_dir: Path, after: Optional[str] = None,
                    letter: Optional[dict[str, Any]] = None) -> str:
     parts = []
+    availability = prof.availability_instructions()
+    if availability:
+        parts.append("CURRENT AVAILABILITY (refreshed from the profile):\n" + availability)
     if after == "needs_cover_letter" and (letter or {}).get("status") == "ok":
         parts.append(f"JobAppBot wrote the cover letter for this job: {letter['path']}\n"
                      "Find the application tab (tabs_context_mcp) and re-read the page. Upload this file to the cover letter "

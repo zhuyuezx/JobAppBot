@@ -70,6 +70,9 @@ Take a screenshot of the CURRENT application page using browser_take_screenshot 
 {json.dumps(str(screenshot))}. Return that exact screenshot_path and the current page_url.
 Keep the application tab open, and return the structured result. No shell tools are available.
 
+CURRENT AVAILABILITY:
+{profile.availability_instructions(task['profile'])}
+
 APPLICANT AND JOB DATA:
 {json.dumps(context, ensure_ascii=False)}
 """
