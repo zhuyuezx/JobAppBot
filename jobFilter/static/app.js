@@ -7,7 +7,7 @@ async function api(path, body) {
   const r = await fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : undefined);
   return r.json();
 }
-const VIA_LABEL = { hiringcafe: 'hiring.cafe', simplify: 'Simplify', startupjobs: 'startup.jobs', applyguy: 'ApplyGuy' };
+const VIA_LABEL = { hiringcafe: 'hiring.cafe', simplify: 'Simplify', startupjobs: 'startup.jobs', applyguy: 'ApplyGuy', speedyapply: 'SpeedyApply' };
 const STATUS_CLASS = { queued: '', running: 'warn', review_ready: 'ok', needs_answer: 'warn', needs_cover_letter: 'warn', needs_login: 'warn', captcha: 'warn', already_applied: '', unavailable: '', failed: 'bad', submitted: 'ok', skipped: '' };
 const STATUS_LABEL = { queued: 'queued', running: 'working', review_ready: 'ready to submit', needs_answer: 'needs your answer', needs_cover_letter: 'writing cover letter', needs_login: 'needs login / code', captcha: 'CAPTCHA', already_applied: 'already applied', unavailable: 'unavailable', failed: 'failed', submitted: 'submitted', skipped: 'skipped' };
 const CLOSED_STATUSES = ['unavailable', 'already_applied'];
@@ -172,7 +172,7 @@ function jobDetails(j, r) {
   </dl>`;
 }
 let srcFilter = 'all';
-const SRC_ORDER = ['hiringcafe', 'simplify', 'startupjobs', 'applyguy'];
+const SRC_ORDER = ['hiringcafe', 'simplify', 'startupjobs', 'applyguy', 'speedyapply'];
 const localDay = iso => { const d = new Date(iso); return isNaN(d) ? '' : `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
 const localTime = iso => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); };
 function groupKey(r) {

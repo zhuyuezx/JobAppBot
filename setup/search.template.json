@@ -110,6 +110,11 @@
       "enabled": true,
       "max_age_days": 3,
       "_max_age_days": "Calendar days, including today. Reads the updating main branch, not a frozen commit."
+    },
+    "speedyapply": {
+      "_what": "SpeedyApply NEW_GRAD_USA.md; direct employer links. Source dates are estimates from table ages anchored to its latest commit. Eligibility still needs screening.",
+      "enabled": true,
+      "max_age_days": 3
     }
   },
   "screening": {

@@ -59,7 +59,7 @@ class ApplyGuyTests(unittest.TestCase):
         self.assertEqual(apply_rules(jobs, {'require_countries':['US']})[0], [])
 
     def test_source_failure_isolated_and_source_can_be_disabled(self):
-        cfg = {'sources': {'hiringcafe': False, 'simplify': False, 'startupjobs': False, 'applyguy': True}}
+        cfg = {'sources': {'hiringcafe': False, 'simplify': False, 'startupjobs': False, 'speedyapply': False, 'applyguy': True}}
         with patch('jobFilter.sources.fetch_applyguy', side_effect=ValueError('bad feed')) as fetch:
             jobs, counts, errors = fetch_all(cfg)
             self.assertEqual(jobs, [])

@@ -195,7 +195,7 @@ class Store:
                 "OR (norm_key = ? AND norm_key != '' AND via != ?)",
                 (job.id, job.dedup_key, nurl, nurl, nkey, job.via)).fetchone()
             if row:
-                if job.via == 'applyguy' and row['id'] != job.id:
+                if job.via in ('applyguy', 'speedyapply') and row['id'] != job.id:
                     # This supplemental list has no experience/sponsorship facts;
                     # matching it must not clear another source's rule exclusion.
                     cur.execute("UPDATE jobs SET last_seen=?, seen_count=seen_count+1 WHERE id=?", (now_iso, row['id']))

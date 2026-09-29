@@ -4,6 +4,7 @@
     simplify     SimplifyJobs/New-Grad-Positions listings.json (curated new-grad list)
     startupjobs  startup.jobs role listings (HTML)
     applyguy     ApplyGuy/2027-New-Grad-Jobs public JSON feed
+    speedyapply  SpeedyApply US new-grad Markdown table
 
 Enabled/configured under the `sources` key of setup/search.json; see
 setup/search.template.json. `fetch_all()` merges everything into one list;
@@ -25,6 +26,7 @@ from curl_cffi import requests
 from jobFilter.hiringcafe import HiringCafeClient
 from jobFilter.models import Job
 from jobFilter.applyguy import fetch_applyguy
+from jobFilter.speedyapply import fetch_speedyapply
 
 ROOT = Path(__file__).resolve().parent.parent
 CACHE_DIR = ROOT / "data" / "cache"
@@ -34,6 +36,7 @@ DEFAULT_SOURCES: dict[str, Any] = {
     "simplify": {"enabled": True, "categories": ["Software", "Software Engineering"], "max_age_days": 3},
     "startupjobs": {"enabled": True, "roles": ["software-engineer"], "max_pages": 10, "max_age_days": 2},
     "applyguy": {"enabled": True, "max_age_days": 3},
+    "speedyapply": {"enabled": True, "max_age_days": 3},
 }
 
 # ----- shared helpers ---------------------------------------------------------
@@ -213,6 +216,7 @@ def fetch_all(cfg: dict[str, Any], search_state: Optional[dict[str, Any]] = None
         "simplify": fetch_simplify,
         "startupjobs": fetch_startupjobs,
         "applyguy": fetch_applyguy,
+        "speedyapply": fetch_speedyapply,
     }
     for name, run in runners.items():
         c = scfg.get(name, {})
