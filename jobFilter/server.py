@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import shutil
+import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -30,6 +31,11 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 def make_handler(store: Store, config_path: Path | None = None):
     config_path = config_path or Path(__file__).resolve().parent.parent / "setup" / "search.json"
+    screening_jobs = set()
+    screening_lock = threading.Lock()
+    def screening_running(job_id):
+        with screening_lock:
+            return job_id in screening_jobs
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):
             if "/api/" in (args[0] if args else ""):
@@ -72,15 +78,20 @@ def make_handler(store: Store, config_path: Path | None = None):
                 elif p == "/api/jobs":
                     since = q.get("since")
                     rows = store.query(since_hours=float(since) if since else None, date=q.get("date"))
+                    if q.get("pending") == "1":
+                        rows = [r for r in rows if r["review"]["pending"]]
                     apps = {a["job_id"]: a["status"] for a in store.list_applications()}
                     same = duplicates.find(rows, store.duplicate_candidates())
                     for r in rows:
                         r["app_status"] = apps.get(r["id"])
+                        r["screening_running"] = screening_running(r["id"])
                         r["duplicates"] = same.get(r["id"], [])
                         r["resume_auto"] = prof.job_resume(r["job"])[0]
                     self._json(rows)
                 elif p == "/api/job":
                     row = store.get(q.get("id", ""))
+                    if row:
+                        row["screening_running"] = screening_running(row["id"])
                     self._json(row or {"error": "not found"}, 200 if row else 404)
                 elif p == "/api/runs":
                     self._json(store.runs())
@@ -144,24 +155,35 @@ def make_handler(store: Store, config_path: Path | None = None):
                 if p == "/api/jobs/review":
                     self._json(store.save_job_review(b.get("job_id", ""), {k: v for k, v in b.items() if k != "job_id"}))
                 elif p == "/api/screen":
-                    import threading
                     from jobFilter import screen
                     row = store.get(b.get("job_id", ""))
                     if not row:
                         return self._json({"error": "unknown job"}, 404)
                     cfg = json.loads(config_path.read_text())
                     scfg = screen.screening_config(cfg)
+                    with screening_lock:
+                        if row["id"] in screening_jobs:
+                            return self._json({"started": False, "running": True})
+                        screening_jobs.add(row["id"])
                     def _go(r=row):
-                        local = Store(store.path)
+                        local = None
                         try:
+                            local = Store(store.path)
                             screen.screen_job(local, r, scfg)
-                        except screen.CodexUnavailable as e:
-                            print(f"Codex screening paused: {e}", flush=True)
                         except Exception as e:
-                            local.save_screening(r["id"], {"status": "failed", "summary": str(e)[:300], "model": screen.model_label(scfg)})
+                            if local:
+                                local.save_screening(r["id"], {"status": "failed", "summary": str(e)[:300], "model": screen.model_label(scfg)})
                         finally:
-                            local.close()
-                    threading.Thread(target=_go, daemon=True).start()
+                            if local:
+                                local.close()
+                            with screening_lock:
+                                screening_jobs.discard(r["id"])
+                    try:
+                        threading.Thread(target=_go, daemon=True).start()
+                    except Exception:
+                        with screening_lock:
+                            screening_jobs.discard(row["id"])
+                        raise
                     self._json({"started": True})
                 elif p == "/api/applications/queue":
                     if not store.get(b.get("job_id", "")):

@@ -10,8 +10,10 @@ TAG_VALUES = {
 
 
 def validate_changes(changes: dict) -> None:
-    if not isinstance(changes, dict) or set(changes) - {"conclusion", "tags", "custom_tags"}:
+    if not isinstance(changes, dict) or set(changes) - {"conclusion", "tags", "custom_tags", "pending"}:
         raise ValueError("Invalid review fields")
+    if "pending" in changes and not isinstance(changes["pending"], bool):
+        raise ValueError("Pending must be true or false")
     if "conclusion" in changes and changes["conclusion"] not in (*STATES, None):
         raise ValueError("Invalid suitability conclusion")
     if "tags" in changes:
@@ -77,4 +79,4 @@ def assess(row: dict) -> dict:
     return {"state": override or automatic, "override": override,
             "automatic_state": automatic, "reasons": reasons,
             "auto_tags": auto_tags, "tags": tags, "tag_overrides": saved.get("tags", {}),
-            "custom_tags": saved.get("custom_tags", [])}
+            "custom_tags": saved.get("custom_tags", []), "pending": saved.get("pending", False)}

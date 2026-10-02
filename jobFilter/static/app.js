@@ -29,27 +29,39 @@ const TAG_LABELS = {
 function reviewBadges(r) {
   const v = r.review; if (!v) return spBadge(r.screening);
   const tone = v.state === 'suitable' ? 'ok' : v.state === 'not_suitable' ? 'bad' : '';
-  return `<span class="badge ${tone}" title="${esc((v.override ? 'Manual conclusion. Automatic: ' + SUITABILITY_LABEL[v.automatic_state] + '. ' : 'Automatic: ') + v.reasons.join('; '))}">${SUITABILITY_LABEL[v.state]}${v.override ? ' · manual' : ''}</span>` +
+  return (v.pending ? '<span class="badge warn" title="Waiting for referral or saved to apply later">Pending</span>' : '') + `<span class="badge ${tone}" title="${esc((v.override ? 'Manual conclusion. Automatic: ' + SUITABILITY_LABEL[v.automatic_state] + '. ' : 'Automatic: ') + v.reasons.join('; '))}">${SUITABILITY_LABEL[v.state]}${v.override ? ' · manual' : ''}</span>` +
     ['new_grad','sponsorship', ...(v.tags.citizenship === 'yes' ? ['citizenship'] : [])].map(key => `<span class="badge" title="${Object.hasOwn(v.tag_overrides, key) ? 'Manually edited' : 'Automatic tag'}">${esc(TAG_LABELS[key][v.tags[key]])}${Object.hasOwn(v.tag_overrides, key) ? ' · edited' : ''}</span>`).join('') +
     v.custom_tags.map(t => `<span class="badge">${esc(t)}</span>`).join('');
 }
 const ROW_ICONS = {
+  pending:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  screen:'<circle cx="10" cy="10" r="7"/><path d="m15 15 6 6m-15-11 3 3 5-5"/>',
   submitted:'<circle cx="12" cy="12" r="9"/><path d="m7 12 3 3 7-7"/>',
   unsuitable:'<circle cx="12" cy="12" r="9"/><path d="m6 6 12 12"/>',
   unavailable:'<circle cx="12" cy="12" r="9"/><path d="M7 12h10"/>',
   tags:'<path d="M3 3h8l10 10-8 8L3 11Z"/><circle cx="7.5" cy="7.5" r="1"/>'
 };
+const icon = key => `<svg viewBox="0 0 24 24" aria-hidden="true">${ROW_ICONS[key]}</svg>`;
+const hint = (text, button) => `<span class="icon-action">${button}<span class="icon-hint" aria-hidden="true">${esc(text)}</span></span>`;
+const screeningRequests = new Set();
+function screenButton(r, compact = false) {
+  const busy = r.screening_running || screeningRequests.has(r.id || r.job_id);
+  const label = busy ? 'Screening suitability…' : `${r.screening ? 'Re-screen' : 'Screen'} suitability · ${screeningProvider === 'codex' ? 'GPT' : 'Claude'}`;
+  return hint(label, `<button class="btn ${compact ? 'icon-btn screen-action' : ''}" data-act="screen" aria-label="${label}" ${busy ? 'disabled' : ''}>${busy ? '<span class="activity-spinner" aria-hidden="true"></span>' : compact ? icon('screen') : label}</button>`);
+}
 function rowActions(r) {
   const status = r.app_status || r.status;
   const unsuitable = r.review?.state === 'not_suitable';
-  const icon = key => `<svg viewBox="0 0 24 24" aria-hidden="true">${ROW_ICONS[key]}</svg>`;
-  const hint = (text, button) => `<span class="icon-action">${button}<span class="icon-hint" aria-hidden="true">${esc(text)}</span></span>`;
   const submittedText = status === 'submitted' ? 'Already submitted' : ['queued','running'].includes(status) ? 'Wait for the active attempt to finish' : 'Mark submitted';
   const unsuitableText = unsuitable ? 'Clear not suitable → Needs review' : 'Mark not suitable';
   const closed = CLOSED_STATUSES.includes(status);
   const unavailableText = closed ? `${STATUS_LABEL[status][0].toUpperCase() + STATUS_LABEL[status].slice(1)} · click to clear`
     : ['queued','running'].includes(status) ? 'Stop the attempt and mark the job unavailable' : 'Mark unavailable (closed or already applied)';
+  const pending = !!r.review?.pending;
+  const pendingDisabled = !pending && ['queued','running','submitted',...CLOSED_STATUSES].includes(status);
+  const pendingText = pending ? 'Clear pending' : pendingDisabled ? 'Pending is for unfinished, inactive jobs' : 'Mark pending · waiting for referral / apply later';
   return `<div class="row-actions">
+    ${hint(pendingText, `<button class="btn icon-btn ${pending ? 'is-pending' : ''}" data-act="toggle-pending" aria-pressed="${pending}" aria-label="${pendingText}" ${pendingDisabled ? 'disabled' : ''}>${icon('pending')}</button>`)}
     ${hint(submittedText, `<button class="btn icon-btn ${status === 'submitted' ? 'is-submitted' : ''}" data-act="mark-submitted" aria-label="${submittedText}" ${['submitted','queued','running'].includes(status) ? 'disabled' : ''}>${icon('submitted')}</button>`)}
     ${hint(unavailableText, `<button class="btn icon-btn ${closed ? 'is-unavailable' : ''}" data-act="toggle-unavailable" aria-pressed="${closed}" aria-label="${unavailableText}" ${status === 'submitted' ? 'disabled' : ''}>${icon('unavailable')}</button>`)}
     ${hint(unsuitableText, `<button class="btn icon-btn ${unsuitable ? 'is-unsuitable' : ''}" data-act="toggle-suitability" aria-pressed="${unsuitable}" aria-label="${unsuitable ? 'Clear not suitable mark' : 'Mark not suitable'}">${icon('unsuitable')}</button>`)}
@@ -62,7 +74,7 @@ async function refreshAfterReview() {
 }
 async function handleRowAction(act, id) {
   const kind = act.dataset.act;
-  if (!['mark-submitted','toggle-suitability','toggle-unavailable','manage-tags'].includes(kind)) return false;
+  if (!['mark-submitted','toggle-pending','toggle-suitability','toggle-unavailable','manage-tags'].includes(kind)) return false;
   act.disabled = true;
   try {
     if (kind === 'manage-tags') {
@@ -71,7 +83,10 @@ async function handleRowAction(act, id) {
       openTagEditor(row);
     } else {
       let result;
-      if (kind === 'mark-submitted') {
+      if (kind === 'toggle-pending') {
+        const row = (tab === 'jobs' ? rows : apps).find(r => (r.id || r.job_id) === id);
+        result = await api('/api/jobs/review', {job_id:id, pending:!row?.review?.pending});
+      } else if (kind === 'mark-submitted') {
         const note = act.closest('.app')?.querySelector('[data-note]')?.value;
         result = await api('/api/applications/status', {job_id:id, status:'submitted', ...(note === undefined ? {} : {note})});
       } else if (kind === 'toggle-unavailable') {
@@ -125,7 +140,7 @@ $('#jobTagForm').addEventListener('submit', async e => {
 });
 function screenBlock(r) {
   const sc = r.screening;
-  const btn = `<button class="btn" data-act="screen">${sc ? 'Screen again' : 'Screen now'} · ${screeningProvider === 'codex' ? 'GPT' : 'Claude'}</button>`;
+  const btn = screenButton(r);
   if (!sc) return `<div class="screen"><p class="sum muted" style="white-space:normal">Not screened yet. ${screeningEnabled ? 'New jobs are screened automatically after each hourly scan.' : 'Automatic screening is paused. You can still screen this job manually.'}</p>${btn}</div>`;
   if (sc.status !== 'ok') return `<div class="screen"><p class="sum">Screening failed: ${esc(sc.summary || '')}</p>${btn}</div>`;
   const ev = (sc.evidence || []).map(e => `<li>${esc(e)}</li>`).join('');
@@ -231,7 +246,7 @@ function rowHtml(r) {
   const j = r.job, link = j.apply_url || r.hc_url;
   return `<div class="job" data-id="${esc(r.id)}">
       <div class="row">
-        <div class="title"><span class="chev" aria-hidden="true">&#9654;</span><a href="${esc(link)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(j.title)}</a>
+        <div class="title">${screenButton(r, true)}<span class="chev" aria-hidden="true">&#9654;</span><a href="${esc(link)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(j.title)}</a>
           ${isRecent(r.first_seen) && !earlierCopies(r).length ? '<span class="badge warn">new</span>' : ''}${duplicateBadge(r)}${(srcFilter === 'all') ? `<span class="badge" title="found via ${esc(j.via || 'hiringcafe')}">${esc(VIA_LABEL[j.via] || 'hiring.cafe')}</span>` : ''}${reviewBadges(r)}${badge(r.app_status)}</div>
         <div class="muted" title="${esc(j.company)}">${esc(j.company)}</div>
         <div class="muted" title="${esc(j.location)}">${esc(j.location || '')}</div>
@@ -268,7 +283,7 @@ function render() {
                                  || (a.job.title || '').localeCompare(b.job.title || '')
                                  || (a.job.location || '').localeCompare(b.job.location || ''));
   $('#count').textContent = `${shown.length} job${shown.length === 1 ? '' : 's'}` + (srcFilter !== 'all' || q ? ` (of ${rows.length})` : '');
-  if (!shown.length) { $('#list').innerHTML = '<div class="empty">Nothing here. Run <code>jobfilter run</code> to fetch.</div>'; return; }
+  if (!shown.length) { $('#list').innerHTML = mode === 'pending' ? '<div class="empty">No pending jobs match these filters. Use the clock button on a job to save it for a referral or later.</div>' : '<div class="empty">Nothing here. Run <code>jobfilter run</code> to fetch.</div>'; return; }
   const groups = new Map();
   for (const r of shown) { const k = groupKey(r); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); }
   const withRuns = list => list.map((r, i) => {
@@ -278,11 +293,19 @@ function render() {
   });
   $('#list').innerHTML = [...groups.keys()].map(k => `<div class="ghead">${esc(k)} <span class="n">${groups.get(k).length}</span></div>` + withRuns(groups.get(k)).join('')).join('');
 }
+let screeningTimer;
 async function load() {
+  clearTimeout(screeningTimer);
+  const openJobs = new Set([...document.querySelectorAll('#list .job.open')].map(el => el.dataset.id));
   let path = '/api/jobs';
   if (mode === '24h') path += '?since=24'; else if (mode === '72h') path += '?since=72';
   else if (mode === 'date') path += '?date=' + encodeURIComponent($('#date').value || '');
-  rows = (await api(path)).filter(r => !r.filter_reason); render();
+  if (mode === 'pending') path += '?pending=1';
+  rows = (await api(path)).filter(r => mode === 'pending' || !r.filter_reason); render();
+  document.querySelectorAll('#list .job').forEach(el => el.classList.toggle('open', openJobs.has(el.dataset.id)));
+  if (tab === 'jobs' && rows.some(r => r.screening_running || screeningRequests.has(r.id))) {
+    screeningTimer = setTimeout(() => { if (tab === 'jobs') load().catch(console.error); }, 3000);
+  }
 }
 async function loadDates() {
   const dates = await api('/api/dates');
@@ -311,10 +334,16 @@ $('#list').addEventListener('click', async e => {
   if (act) {
     if (await handleRowAction(act, job.dataset.id)) return;
     if (act.dataset.act === 'screen') {
-      act.disabled = true; act.textContent = 'Screening... (about 30s)';
-      await api('/api/screen', { job_id: job.dataset.id });
-      const poll = async (n) => { await new Promise(res => setTimeout(res, 5000)); await load(); const row = rows.find(x => x.id === job.dataset.id); if (row && row.screening && n < 24) { /* done */ } else if (n < 24) poll(n + 1); };
-      poll(0); return;
+      const id = job.dataset.id;
+      if (screeningRequests.has(id)) return;
+      screeningRequests.add(id);
+      act.disabled = true;
+      try {
+        const result = await api('/api/screen', {job_id:id});
+        if (result.error) throw new Error(result.error);
+      } catch (err) { alert('Could not screen job: ' + err.message); }
+      finally { screeningRequests.delete(id); act.disabled = false; }
+      await load(); return;
     }
     if (act.dataset.act === 'prepare') {
       const box = job.querySelector('[data-launch-id]');

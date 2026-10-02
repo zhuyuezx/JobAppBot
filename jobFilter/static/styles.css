@@ -117,3 +117,7 @@
   .tag-fields label { display:flex; flex-direction:column; gap:5px; }
   #tagError { color:var(--badfg); }
   @media (max-width:1000px) { .job > .row, .app > .row { grid-template-columns:1fr; gap:5px; } .row-actions { justify-self:end; } }
+
+  .icon-btn.is-pending { color:var(--warnfg); background:var(--warn); border-color:var(--warnfg); }
+  .title > .icon-action { margin-right:8px; vertical-align:middle; }
+  .title > .icon-action .icon-hint { left:0; right:auto; }

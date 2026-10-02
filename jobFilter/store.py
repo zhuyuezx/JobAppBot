@@ -276,12 +276,20 @@ class Store:
         row = self.get(job_id)
         if not row:
             raise ValueError("Unknown job")
+        if changes.get("pending"):
+            app = self.get_application(job_id)
+            if app and app["status"] in ("queued", "running", "submitted", "already_applied", "unavailable"):
+                raise ValueError("Only an unfinished, inactive job can be marked pending. Stop an active attempt first.")
         saved = {**row["review_overrides"], **changes}
         if "custom_tags" in saved:
             saved["custom_tags"] = list(dict.fromkeys(t.strip() for t in saved["custom_tags"]))
         self.conn.execute("UPDATE jobs SET review_json=? WHERE id=?", (json.dumps(saved), job_id))
         self.conn.commit()
         return self.get(job_id)
+
+    def _clear_pending(self, job_id: str) -> None:
+        """Part of the caller's transaction; preserve all other review overrides."""
+        self.conn.execute("UPDATE jobs SET review_json=json_remove(review_json, '$.pending') WHERE id=?", (job_id,))
 
     def duplicate_candidates(self) -> list[dict[str, Any]]:
         """Every visible job with its application status, for cross-source duplicate tagging."""
@@ -395,6 +403,7 @@ class Store:
                VALUES (?, 'queued', ?, ?, ?, ?)
                ON CONFLICT(job_id) DO UPDATE SET status='queued', engine=excluded.engine, updated_at=excluded.updated_at""",
             (job_id, engine, now, now, json.dumps(chosen) if chosen else None))
+        self._clear_pending(job_id)
         self.conn.commit()
         return self.get_application(job_id)
 
@@ -415,6 +424,7 @@ class Store:
                    submitted_at=COALESCE(applications.submitted_at, excluded.submitted_at),
                    note=COALESCE(excluded.note, applications.note)""",
                 (job_id, now, now, now, note))
+            self._clear_pending(job_id)
             self.conn.execute("UPDATE questions SET status='superseded' WHERE job_id=? AND status='open'", (job_id,))
         return self.get_application(job_id)
 
@@ -434,6 +444,7 @@ class Store:
                    ON CONFLICT(job_id) DO UPDATE SET status='unavailable', updated_at=excluded.updated_at,
                    summary=excluded.summary, note=COALESCE(excluded.note, applications.note)""",
                 (job_id, now, now, note))
+            self._clear_pending(job_id)
             self.conn.execute("UPDATE questions SET status='superseded' WHERE job_id=? AND status='open'", (job_id,))
         return self.get_application(job_id)
 
@@ -467,6 +478,8 @@ class Store:
                 fields["submitted_at_estimated"] = 0
         cols = ", ".join(f"{k} = ?" for k in fields)
         self.conn.execute(f"UPDATE applications SET {cols} WHERE job_id = ?", (*fields.values(), job_id))
+        if fields.get("status") in ("queued", "running", "submitted", "already_applied", "unavailable"):
+            self._clear_pending(job_id)
         self.conn.commit()
 
     def bump_attempts(self, job_id: str) -> None:
