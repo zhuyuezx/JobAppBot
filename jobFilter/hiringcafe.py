@@ -3,7 +3,7 @@
 hiring.cafe sits behind a Cloudflare managed challenge, so plain `requests`
 gets a 403. `curl_cffi` with a Chrome TLS fingerprint passes it. Search
 results are embedded in the Next.js page props, which we read either from the
-lightweight `/_next/data/<buildId>/index.json` route or, as a fallback, from
+lightweight `/_next/data/<buildId>/classic.json` route or, as a fallback, from
 the `__NEXT_DATA__` blob in the HTML.
 """
 from __future__ import annotations
@@ -18,6 +18,7 @@ from typing import Any, Iterator, Optional
 from curl_cffi import requests
 
 BASE_URL = "https://hiringcafe.com"
+SEARCH_PATH = "/classic"
 _NEXT_DATA_RE = re.compile(
     r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', re.S
 )
@@ -62,7 +63,7 @@ class HiringCafeClient:
     def build_id(self, refresh: bool = False) -> str:
         if self._build_id and not refresh:
             return self._build_id
-        html = self._get("/").text
+        html = self._get(SEARCH_PATH).text
         self._build_id = self._parse_next_data(html)["buildId"]
         return self._build_id
 
@@ -72,7 +73,21 @@ class HiringCafeClient:
         params = {"searchState": json.dumps(search_state, separators=(",", ":"))}
         if page:
             params["page"] = str(page)
-        return BASE_URL + "/?" + urllib.parse.urlencode(params)
+        return BASE_URL + SEARCH_PATH + "?" + urllib.parse.urlencode(params)
+
+    @staticmethod
+    def _search_props(props: Any) -> dict[str, Any]:
+        """A redirect/page shell is not a successful empty search."""
+        if not isinstance(props, dict):
+            raise HiringCafeError("Invalid search page props")
+        if props.get("ssrError"):
+            raise HiringCafeError(f"search error: {props['ssrError']}")
+        if (not isinstance(props.get("ssrHits"), list)
+                or not isinstance(props.get("ssrIsLastPage"), bool)):
+            raise HiringCafeError("Search results missing: expected ssrHits and ssrIsLastPage (redirect or changed page format)")
+        if not props["ssrHits"] and not props["ssrIsLastPage"]:
+            raise HiringCafeError("Empty search page claims more results; refusing to truncate search")
+        return props
 
     def search_page(self, search_state: dict[str, Any], page: int = 0) -> dict[str, Any]:
         """Return the `pageProps` dict for one results page."""
@@ -82,25 +97,23 @@ class HiringCafeClient:
         # Fast path: Next.js data route.
         for attempt in range(2):
             try:
-                path = f"/_next/data/{self.build_id(refresh=attempt > 0)}/index.json"
-                resp = self._get(path, params, headers={"x-nextjs-data": "1", "referer": BASE_URL + "/"}, attempts=1)
+                path = f"/_next/data/{self.build_id(refresh=attempt > 0)}/classic.json"
+                resp = self._get(path, params, headers={"x-nextjs-data": "1", "referer": BASE_URL + SEARCH_PATH}, attempts=1)
                 if resp.headers.get("content-type", "").startswith("application/json"):
-                    return resp.json()["pageProps"]
+                    return self._search_props(resp.json()["pageProps"])
             except (HiringCafeError, KeyError, ValueError):
                 pass
         # Fallback: full HTML page.
-        html = self._get("/", params).text
-        return self._parse_next_data(html)["props"]["pageProps"]
+        html = self._get(SEARCH_PATH, params).text
+        return self._search_props(self._parse_next_data(html)["props"]["pageProps"])
 
     def search(self, search_state: dict[str, Any], max_pages: int = 25) -> Iterator[dict[str, Any]]:
         """Yield raw hits across all result pages."""
         for page in range(max_pages):
-            props = self.search_page(search_state, page)
-            if props.get("ssrError"):
-                raise HiringCafeError(f"search error: {props['ssrError']}")
-            hits = props.get("ssrHits") or []
+            props = self._search_props(self.search_page(search_state, page))
+            hits = props["ssrHits"]
             yield from hits
-            if props.get("ssrIsLastPage", True) or not hits:
+            if props["ssrIsLastPage"]:
                 return
             time.sleep(self.delay)
 

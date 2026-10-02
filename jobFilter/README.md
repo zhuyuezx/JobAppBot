@@ -56,11 +56,12 @@ that blocks plain `requests`/`curl`. Two things make it scriptable:
 1. `curl_cffi` with a Chrome TLS fingerprint (`impersonate="chrome"`) passes
    the challenge without a browser.
 2. Search results are server-rendered by Next.js. The `searchState` JSON from
-   the site URL is sent to `/_next/data/<buildId>/index.json?searchState=...&page=N`
+   the site URL is sent to `/_next/data/<buildId>/classic.json?searchState=...&page=N`
    with header `x-nextjs-data: 1`; the response's `pageProps` has `ssrHits`,
-   `ssrTotalCount`, `ssrIsLastPage`. `buildId` is read from the homepage's
+   `ssrTotalCount`, `ssrIsLastPage`. `buildId` is read from `/classic`'s
    `__NEXT_DATA__` and refreshed when the data route stops answering; the
-   HTML page is the fallback.
+   `/classic` HTML page is the fallback. Redirects and missing result fields
+   are rejected instead of being counted as a successful empty search.
 
 Each hit carries hiring.cafe's own enrichment under `v5_processed_job_data`:
 `job_category`, `min_industry_and_role_yoe`, `security_clearance`,
