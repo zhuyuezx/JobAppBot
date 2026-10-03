@@ -7,7 +7,6 @@ from dataclasses import dataclass, field, asdict
 from typing import Any, Optional
 
 HC_JOB_URL = "https://hiringcafe.com/job/{id}"
-_TRACKING_PARAMS = ("utm_", "gh_src", "lever-source", "source", "ref", "src")
 
 
 @dataclass
@@ -47,28 +46,8 @@ class Job:
     # ----- cross-source dedup keys ------------------------------------------
     def norm_url(self) -> Optional[str]:
         """Apply URL without tracking params, scheme or trailing slash."""
-        if not self.apply_url:
-            return None
-        u = urllib.parse.urlsplit(self.apply_url.strip())
-        host = u.netloc.lower()
-        path = u.path.rstrip("/").lower()
-        # Employer requisitions are the same posting across language, slug,
-        # tracking and application-step URL variants used by different feeds.
-        if host.endswith('.myworkdayjobs.com'):
-            match = re.fullmatch(r'/(?:[a-z]{2}-[a-z]{2}/)?([^/]+)/job/[^/]+/[^/]+_([^/]+?)(?:/apply)?', path)
-            if match:
-                return f"{host}/{match[1]}/job/{match[2]}"
-        if host in ('boards.greenhouse.io', 'job-boards.greenhouse.io'):
-            match = re.fullmatch(r'/([^/]+)/jobs/(\d+)(?:/application)?', path)
-            if match:
-                return f"boards.greenhouse.io/{match[1]}/jobs/{match[2]}"
-        if host == 'jobs.lever.co':
-            path = re.sub(r'/apply$', '', path)
-        if host == 'jobs.ashbyhq.com':
-            path = re.sub(r'/application$', '', path)
-        qs = [(k, v) for k, v in urllib.parse.parse_qsl(u.query, keep_blank_values=True)
-              if not k.lower().startswith(_TRACKING_PARAMS)]
-        return f"{host}{path}" + (("?" + urllib.parse.urlencode(sorted(qs))) if qs else "")
+        from jobFilter.job_identity import normalize_apply_url
+        return normalize_apply_url(self.apply_url)
 
     def norm_key(self) -> str:
         """Company + title + location, lowercased and stripped of punctuation.

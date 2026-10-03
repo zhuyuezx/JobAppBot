@@ -233,14 +233,16 @@ $('#list').addEventListener('change', e => {
   launchDrafts.set(id, choice);
   if (e.target.matches('[data-run-engine]')) box.outerHTML = launchControls(id);
 });
-// The same posting listed by another source (see jobFilter/duplicates.py).
+// Employer-ID matches and possible repeats (including the same source).
 const earlierCopies = r => (r.duplicates || []).filter(d => (d.first_seen || '') < (r.first_seen || ''));
 function duplicateBadge(r) {
   const same = r.duplicates || []; if (!same.length) return '';
   const applied = same.find(d => d.app_status), earlier = earlierCopies(r);
-  const title = same.map(d => `Same posting on ${VIA_LABEL[d.via] || d.via} (${d.location || 'no location'}), found ${fmt(d.first_seen)}${d.app_status ? ' · application: ' + (STATUS_LABEL[d.app_status] || d.app_status) : ''}`).join('\n');
-  const via = VIA_LABEL[(earlier[0] || same[0]).via] || (earlier[0] || same[0]).via;
-  return `<span class="badge ${applied ? 'warn' : ''}" title="${esc(title)}">${earlier.length ? 'seen before' : 'also'} on ${esc(via)}${applied ? ' · ' + esc(STATUS_LABEL[applied.app_status] || applied.app_status) : ''}</span>`;
+  const representative = applied || earlier[0] || same[0];
+  const title = same.map(d => `${d.match_type === 'exact' ? 'Same employer posting' : 'Possible repeat (company/title/location; may be a different requisition)'} on ${VIA_LABEL[d.via] || d.via} (${d.location || 'no location'}), found ${fmt(d.first_seen)}${d.app_status ? ' · application: ' + (STATUS_LABEL[d.app_status] || d.app_status) : ''}`).join('\n');
+  const via = VIA_LABEL[representative.via] || representative.via;
+  const label = representative.match_type === 'exact' ? (earlier.length ? 'seen before' : 'also listed') : 'Possible repeat';
+  return `<span class="badge ${applied ? 'warn' : ''}" title="${esc(title)}">${label} on ${esc(via)}${applied ? ' · ' + esc(STATUS_LABEL[applied.app_status] || applied.app_status) : ''}</span>`;
 }
 function rowHtml(r) {
   const j = r.job, link = j.apply_url || r.hc_url;
@@ -255,7 +257,7 @@ function rowHtml(r) {
       </div>
       <div class="details">
         ${screenBlock(r)}
-        ${(r.duplicates || []).length ? `<p class="help">Same posting elsewhere: ${r.duplicates.map(d => `<a href="${esc(d.apply_url || '#')}" target="_blank" rel="noopener">${esc(VIA_LABEL[d.via] || d.via)}</a> (${esc(d.location || 'no location')}, found ${esc(fmt(d.first_seen))}${d.app_status ? ', application ' + esc(STATUS_LABEL[d.app_status] || d.app_status) : ''})`).join('; ')}</p>` : ''}
+        ${(r.duplicates || []).length ? `<p class="help">Related listings: ${r.duplicates.map(d => `<a href="${esc(d.apply_url || '#')}" target="_blank" rel="noopener">${esc(VIA_LABEL[d.via] || d.via)}</a> (${d.match_type === 'exact' ? 'same employer posting' : 'possible repeat'}, ${esc(d.location || 'no location')}, found ${esc(fmt(d.first_seen))}${d.app_status ? ', application ' + esc(STATUS_LABEL[d.app_status] || d.app_status) : ''})`).join('; ')}</p>` : ''}
         ${jobDetails(j, r)}
         ${!r.app_status ? launchControls(r.id) : ''}
         <div class="actions">
@@ -351,7 +353,7 @@ $('#list').addEventListener('click', async e => {
       const model = box.querySelector('[data-run-model]').value;
       if (!model) { alert('Choose an application model first.'); return; }
       const twin = (rows.find(x => x.id === job.dataset.id)?.duplicates || []).find(d => d.app_status);
-      if (twin && !confirm(`This posting already has an application via ${VIA_LABEL[twin.via] || twin.via} (${STATUS_LABEL[twin.app_status] || twin.app_status}). Prepare another one anyway?`)) return;
+      if (twin && !confirm(`${twin.match_type === 'exact' ? 'This employer posting' : 'A possible repeat (which may be a different requisition)'} already has an application via ${VIA_LABEL[twin.via] || twin.via} (${STATUS_LABEL[twin.app_status] || twin.app_status}). Prepare another one anyway?`)) return;
       const settings = {...(engine === 'codex-playwright' ? {codex_model: model, codex_reasoning_effort: box.querySelector('[data-run-effort]').value} : {model}),
         resume: box.querySelector('[data-run-resume]').value};
       act.disabled = true; act.textContent = 'Queued...';

@@ -64,3 +64,13 @@ test('left screening button tracks a re-screen even when an old result exists', 
   assert.match(ui.element('#list').innerHTML, /new result/);
   assert.doesNotMatch(ui.element('#list').innerHTML, /activity-spinner/);
 });
+
+test('duplicate warnings distinguish confirmed matches and possible repeats with the correct source status', () => {
+  const ui = frontend();
+  const exact = ui.run("duplicateBadge({first_seen:'2026-10-03', duplicates:[{via:'hiringcafe', first_seen:'2026-10-01', match_type:'exact', app_status:'submitted'}]})");
+  assert.match(exact, /seen before on hiring.cafe · submitted/);
+  assert.match(exact, /Same employer posting/);
+  const possible = ui.run("duplicateBadge({first_seen:'2026-10-03', duplicates:[{via:'hiringcafe', first_seen:'2026-09-01', match_type:'exact'}, {via:'speedyapply', first_seen:'2026-10-01', match_type:'possible', app_status:'submitted'}]})");
+  assert.match(possible, /Possible repeat on SpeedyApply · submitted/);
+  assert.match(possible, /may be a different requisition/);
+});

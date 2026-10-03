@@ -37,7 +37,8 @@ class DuplicateTests(unittest.TestCase):
                 {**base, 'id': 'same-source'},
                 {**base, 'id': 'other-company', 'via': 'startupjobs', 'company': 'Snap'}]
         found = duplicates.find(rows, rows)
-        self.assertEqual([r['id'] for r in found['original']], ['copy'])
+        self.assertEqual([r['id'] for r in found['original']], ['same-source', 'copy'])
+        self.assertTrue(all(r['match_type'] == 'possible' for r in found['original']))
         self.assertIn('original', [r['id'] for r in found['copy']])
         self.assertNotIn('other-state', found)
         self.assertNotIn('other-role', found)
@@ -65,7 +66,7 @@ class DuplicateTests(unittest.TestCase):
         self.assertNotIn("intern", found)
         self.assertNotIn("visa-sf", found, "the same title in another city is another position")
         self.assertEqual(found["visa-austin"], ["visa-austin-2", "visa-austin-3"])
-        self.assertEqual(found["visa-austin-2"], ["visa-austin"], "one source's own listings are never tagged")
+        self.assertEqual(found["visa-austin-2"], ["visa-austin", "visa-austin-3"], "same-source repeats should also warn")
         self.assertEqual(found["fn-us"], ["fn-remote"])
         self.assertEqual(duplicates.cities("Seattle, WA; SF; NYC"), {"seattle", "san francisco", "new york"})
         self.assertEqual(duplicates.cities("San Francisco Bay Area"), {"san francisco"})

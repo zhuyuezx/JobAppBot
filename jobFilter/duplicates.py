@@ -1,18 +1,14 @@
-"""Cross-source duplicates: one posting listed by two aggregators.
+"""Exact posting matches and possible repeats, including repeats within one source.
 
-Ingestion already merges listings with the same apply URL, or the same company,
-title and location text. What slips through are listings whose URL and
-location wording differ. ApplyGuy links SeatGeek's own Greenhouse page as
-"New York City, NY", while startup.jobs links its redirect page as "New York,
-U.S.". Those stay separate rows and are tagged instead: same company, same
-title, another source, and a compatible location. A tag only informs, so the
-location test leans toward matching: state-level listings can match cities in
-that state, but explicitly different states or cities remain separate.
+Only a shared employer URL/requisition confirms a duplicate. Matching company,
+title and location is a warning; distinct requisitions retain separate records.
 """
 from __future__ import annotations
 
 import re
 from typing import Any
+
+from jobFilter.job_identity import normalize_apply_url
 
 _COMPANY_SUFFIX = re.compile(r"\b(inc|llc|ltd|corp|corporation|co|company|limited|plc|group|holdings|technologies|technology)\b\.?")
 _TITLE_WORDS = {"graduate": "grad", "graduates": "grad", "grads": "grad", "sr": "senior", "jr": "junior", "and": "",
@@ -50,7 +46,7 @@ def title_key(title: str) -> str:
 def cities(location: str) -> set[str]:
     """City names in a location string; "remote" counts as one. Countries and filler are dropped."""
     found = set()
-    for part in re.split(r"[;|/]|\s+(?:or|and)\s+", (location or "").lower()):
+    for part in re.split(r"[;|/·]|\s+(?:or|and)\s+", re.sub(r"\s+\+\d+$", "", (location or "").lower())):
         city = _words(part.split(",")[0])
         if "remote" in city.split():
             found.add("remote")
@@ -74,7 +70,7 @@ def _same_place(a: set[str], b: set[str]) -> bool:
 
 def _states(location: str) -> set[str]:
     found = set()
-    for part in re.split(r'[;|/]|\s+(?:or|and)\s+', (location or '').lower()):
+    for part in re.split(r'[;|/·]|\s+(?:or|and)\s+', re.sub(r'\s+\+\d+$', '', (location or '').lower())):
         pieces = [_words(p) for p in part.split(',')]
         # A trailing state is explicit; a leading state is regional only if
         # followed by country/filler, so Washington, DC is not Washington state.
@@ -94,20 +90,30 @@ def _compatible_location(a: str, b: str) -> bool:
 
 
 def find(rows: list[dict[str, Any]], candidates: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
-    """For each row, the candidates from other sources that are the same posting, oldest first.
-
-    rows and candidates carry id, via, company, title, location, first_seen; candidates may add app_status.
-    """
+    """Return annotated matches, without merging jobs or their application history."""
     by_key: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    by_url: dict[str, list[dict[str, Any]]] = {}
+    urls = {}
     for c in candidates:
         key = (company_key(c.get("company")), title_key(c.get("title")))
         if all(key):
             by_key.setdefault(key, []).append(c)
+        url = normalize_apply_url(c.get("apply_url"))
+        urls[c["id"]] = url
+        if url:
+            by_url.setdefault(url, []).append(c)
     out: dict[str, list[dict[str, Any]]] = {}
     for r in rows:
         key = (company_key(r.get("company")), title_key(r.get("title")))
-        same = [c for c in by_key.get(key, []) if c["id"] != r["id"] and (c.get("via") or "hiringcafe") != (r.get("via") or "hiringcafe")
-                and _compatible_location(r.get("location"), c.get("location"))]
+        url = normalize_apply_url(r.get("apply_url"))
+        pool = {c['id']: c for c in by_key.get(key, []) + by_url.get(url, [])}
+        same = []
+        for c in pool.values():
+            if c['id'] == r['id']:
+                continue
+            exact = bool(url and url == urls[c['id']])
+            if exact or _compatible_location(r.get('location'), c.get('location')):
+                same.append({**c, 'match_type': 'exact' if exact else 'possible'})
         if same:
-            out[r["id"]] = sorted(same, key=lambda c: c.get("first_seen") or "")
+            out[r['id']] = sorted(same, key=lambda c: (c.get('first_seen') or '', c['id']))
     return out

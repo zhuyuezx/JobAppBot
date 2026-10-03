@@ -107,7 +107,7 @@ def _iso() -> str:
     return utc_now().isoformat(timespec="seconds")
 
 
-NORM_KEY_VERSION = 3  # 2: company+title+location; 3: canonical employer requisition URLs
+NORM_KEY_VERSION = 4  # Shared employer identities; Workday boards, iCIMS aliases, Oracle fragments.
 
 APP_STATUSES = ("queued", "running", "review_ready", "needs_answer", "needs_cover_letter", "needs_login", "captcha",
                 "already_applied", "unavailable", "failed", "submitted", "skipped")
@@ -184,16 +184,23 @@ class Store:
         local_date = now.astimezone().strftime("%Y-%m-%d")
         new: list[Job] = []
         cur = self.conn.cursor()
+        from jobFilter.job_identity import posting_identity
         matched_rows: set[str] = set()
         for job in jobs:
             reason = (rejection_reasons or {}).get(job.id)
             nurl, nkey = job.norm_url(), job.norm_key()
             # same posting seen before: by id, by cluster when neither has an apply URL, by apply URL, or (only across
             # sources; within one source the id is authoritative) by company+title+location
-            row = cur.execute(
-                "SELECT id, filter_reason FROM jobs WHERE id = ? OR (dedup_key = ? AND norm_url IS NULL AND ? IS NULL) OR (norm_url IS NOT NULL AND norm_url = ?) "
+            matches = cur.execute(
+                "SELECT id, filter_reason, apply_url, norm_url FROM jobs WHERE id = ? OR (dedup_key = ? AND norm_url IS NULL AND ? IS NULL) OR (norm_url IS NOT NULL AND norm_url = ?) "
                 "OR (norm_key = ? AND norm_key != '' AND via != ?)",
-                (job.id, job.dedup_key, nurl, nurl, nkey, job.via)).fetchone()
+                (job.id, job.dedup_key, nurl, nurl, nkey, job.via)).fetchall()
+            identity = posting_identity(job.apply_url)
+            row = next((r for r in matches if r['id'] == job.id), None)
+            if row is None:
+                matches.sort(key=lambda r: r['norm_url'] != nurl)
+                row = next((r for r in matches if not (identity and posting_identity(r['apply_url'])
+                           and identity != posting_identity(r['apply_url']))), None)
             if row:
                 if job.via in ('applyguy', 'speedyapply') and row['id'] != job.id:
                     # This supplemental list has no experience/sponsorship facts;
