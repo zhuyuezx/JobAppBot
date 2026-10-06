@@ -18,4 +18,4 @@ packages = ["jobFilter"]
 include-package-data = true
 
 [tool.setuptools.package-data]
-jobFilter = ["static/*.html", "static/*.js", "static/*.css"]
+jobFilter = ["static/*.html", "static/*.js", "static/*.css", "guidance/*.md"]

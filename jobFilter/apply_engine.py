@@ -21,43 +21,22 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-from jobFilter import cover_letter, profile as prof
+from jobFilter import application_guidance, cover_letter, profile as prof
 from jobFilter.store import ACTIVE_STATUSES, Store
 from jobFilter.application_state import RESULT_SCHEMA, structured_result, work_directory
 from jobFilter.providers import CLAUDE, CODEX, validate_engine
 
 ROOT = Path(__file__).resolve().parent.parent
 SKILL_PATH = ROOT / ".claude" / "skills" / "apply-job" / "SKILL.md"
-LESSONS_HEADER = "## Learned from runs"
 
 
 def load_skill() -> str:
-    """Body of the apply-job skill (front matter stripped)."""
-    if not SKILL_PATH.exists():
-        return ""
-    text = SKILL_PATH.read_text()
-    if text.startswith("---"):
-        end = text.find("\n---", 3)
-        if end != -1:
-            text = text[end + 4:]
-    return text.strip()
+    """Stable core only; old learned notes are available through lazy references."""
+    return application_guidance.body(application_guidance.CORE_PATH.read_text())
 
 
 def append_lessons(lessons: list[str], company: str) -> int:
-    """Append new lessons to the skill's 'Learned from runs' section. Returns how many were added."""
-    if not lessons or not SKILL_PATH.exists():
-        return 0
-    text = SKILL_PATH.read_text()
-    existing = text.lower()
-    new = [l.strip() for l in lessons if l and l.strip() and l.strip().lower()[:60] not in existing]
-    if not new:
-        return 0
-    if LESSONS_HEADER not in text:
-        text = text.rstrip() + f"\n\n{LESSONS_HEADER}\n\n"
-    date = time.strftime("%Y-%m-%d")
-    text = text.rstrip() + "\n" + "".join(f"- {date} {company}: {l}\n" for l in new)
-    SKILL_PATH.write_text(text)
-    return len(new)
+    return application_guidance.append_lessons(SKILL_PATH, lessons, company)
 # Model / turn cap come from data/profile/settings.json (UI: Applications tab);
 # JOBFILTER_MODEL / JOBFILTER_MAX_TURNS env vars override them.
 
@@ -120,7 +99,8 @@ def build_prompt(app: dict[str, Any], work_dir: Path, letter: Optional[dict[str,
     rules = profile.pop("rules_for_claude", [])
     bank = "\n".join(f"- Q: {a['question']}\n  A: {a['answer']}" for a in answers) or "(empty)"
     skill = load_skill()
-    return f"""Fill the job application below in the user's Chrome. Follow the SKILL exactly; it is the accumulated experience from previous applications.
+    references = application_guidance.reference_instructions(SKILL_PATH)
+    return f"""Fill the job application below in the user's Chrome. Follow the compact SKILL below. Platform guides and historical notes are available on demand; do not preload them.
 
 JOB
 - Title: {job.get('title')}
@@ -136,6 +116,9 @@ At the end, return the structured result. In `lessons`, list only new reusable f
 ===== SKILL =====
 {skill}
 
+===== REFERENCE FILES (read only when relevant) =====
+{references}
+
 ===== USER RULES =====
 {chr(10).join('- ' + r for r in rules)}
 
@@ -149,10 +132,10 @@ At the end, return the structured result. In `lessons`, list only new reusable f
 {bank}
 
 ===== RESUME TEXT (the uploaded {resume['version'].upper()} file) =====
-{resume['text'][:6000]}
+{resume['text']}
 
 ===== ROLE DESCRIPTIONS (for experience fields; the same for every resume version) =====
-{prof.role_descriptions_text()[:8000]}
+{prof.role_descriptions_text()}
 
 ===== COVER LETTER TEXT =====
 {letter.get('text') or '(none)'}
@@ -182,6 +165,8 @@ def resume_message(questions: list[dict[str, Any]], work_dir: Path, after: Optio
     if questions:
         lines = [f"- Q: {q['question']}\n  A: {q['answer']}" for q in questions]
         parts.append("The user answered the open questions:\n" + "\n".join(lines) + "\n\nFill these answers in.")
+    parts.append("Reconcile every saved work-history and education entry with the supplied facts before reporting ready; "
+                 "continue adding missing records rather than stopping after the first entry.")
     parts.append("Continue to the review page, take a screenshot with save_to_disk and report its path, and stop with status "
                  "review_ready. Never click Submit. Include any new reusable facts about this form in `lessons`.")
     return "\n\n".join(parts)
@@ -282,7 +267,7 @@ def run_application(store: Store, app: dict[str, Any]) -> dict[str, Any]:
     cmd = [claude, "-p", prompt, "--chrome", "--output-format", "stream-json", "--verbose",
            "--json-schema", json.dumps(RESULT_SCHEMA), "--max-turns", str(settings["max_turns"]),
            "--model", settings["model"],
-           "--allowedTools", "mcp__claude-in-chrome", "Read", "--add-dir", str(ROOT / "data")]
+           "--allowedTools", "mcp__claude-in-chrome", "Read", "Grep", "--add-dir", str(ROOT / "data")]
     if resuming:
         cmd += ["--resume", app["session_id"]]
     env = {k: v for k, v in os.environ.items() if k not in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT")}
@@ -323,7 +308,7 @@ def run_application(store: Store, app: dict[str, Any]) -> dict[str, Any]:
     added = append_lessons(out.get("lessons") or [], app["job"].get("company") or job_id)
     if added:
         with log_path.open("a") as log:
-            log.write(f"[skill] {added} new lesson(s) appended to {SKILL_PATH.relative_to(ROOT)}\n")
+            log.write(f"[skill] {added} new lesson(s) archived in {application_guidance.archive_path(SKILL_PATH)}\n")
 
     for q in answered:  # delivered
         store.conn.execute("UPDATE questions SET status = 'sent' WHERE id = ?", (q["id"],))

@@ -227,6 +227,8 @@ class IntegrationTests(unittest.TestCase):
             cmd = run.call_args.args[0]
             for flag in ["--chrome", "--json-schema", "--allowedTools"]:
                 self.assertIn(flag, cmd)
+            allowed = cmd[cmd.index("--allowedTools") + 1:cmd.index("--add-dir")]
+            self.assertEqual(allowed, ["mcp__claude-in-chrome", "Read", "Grep"])
             self.assertNotIn("--resume", cmd)
             self.store.update_application("test", result=result("needs_login"))
             app = self.store.get_application("test")

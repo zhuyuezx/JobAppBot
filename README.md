@@ -29,6 +29,8 @@ Configure your profile and sign in to the provider you want to use:
 - **Claude Code:** install Claude in Chrome and run `claude --chrome` once. See [application setup](docs/APPLY_AUTOMATION.md).
 - **ChatGPT / Codex:** follow the [browser bridge setup](docs/CODEX_INTEGRATION.md).
 
+Claude applications load a short [core workflow](jobFilter/guidance/SKILL.md), with platform guides and historical lessons read only when needed. Complete applicant history stays in the prompt. See the [context optimization notes](docs/CLAUDE_COST_REVIEW.md#implemented-2026-10-06).
+
 ## Frontend workflow
 
 1. **Find jobs.** Browse hiring.cafe, Simplify, startup.jobs, ApplyGuy, and SpeedyApply by source or date found. Search by title, company, or location. Jobs rejected by your search rules stay hidden. Employer job IDs and URL variants identify exact duplicates, including repeats within one source. Existing copies show **seen before / also listed**; title-and-location matches show **Possible repeat** because they may be separate requisitions. Warnings include the other record's application status, and preparing another application asks for confirmation. Use the **clock icon** to mark a job **Pending** while waiting for a referral or saving it for later; the **Pending** view keeps these jobs across all dates. Starting an application or marking it submitted clears Pending.

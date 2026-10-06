@@ -14,7 +14,8 @@ class AvailabilityTests(unittest.TestCase):
             applicant = {'education': [{'end': '2027-06', 'expected': True}],
                          'preferences': {'earliest_start_date': '2027-06-01'}}
             path.write_text(json.dumps(applicant))
-            with patch.object(profile, 'PROFILE_PATH', path), \
+            with patch.object(apply_engine, 'SKILL_PATH', Path(tmp) / 'skill.md'), \
+                 patch.object(profile, 'PROFILE_PATH', path), \
                  patch.object(profile, 'load_answers', return_value=[]), \
                  patch.object(profile, 'application_resume', return_value={'path': '', 'version': 'sde', 'reason': 'test', 'text': 'Graduation: June 2027'}), \
                  patch.object(apply_engine, 'load_skill', return_value=''):
