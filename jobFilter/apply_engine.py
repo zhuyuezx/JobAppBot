@@ -119,6 +119,9 @@ At the end, return the structured result. In `lessons`, list only new reusable f
 ===== REFERENCE FILES (read only when relevant) =====
 {references}
 
+===== FIELD REVIEW STANDARD =====
+{application_guidance.review_instructions()}
+
 ===== USER RULES =====
 {chr(10).join('- ' + r for r in rules)}
 
@@ -145,9 +148,16 @@ At the end, return the structured result. In `lessons`, list only new reusable f
 def resume_message(questions: list[dict[str, Any]], work_dir: Path, after: Optional[str] = None,
                    letter: Optional[dict[str, Any]] = None) -> str:
     parts = []
-    availability = prof.availability_instructions()
+    current_profile = prof.load_profile()
+    availability = prof.availability_instructions(current_profile)
     if availability:
         parts.append("CURRENT AVAILABILITY (refreshed from the profile):\n" + availability)
+    parts.append("CURRENT EDUCATION (refreshed from the profile; overrides stale parsed/session values):\n" +
+                 json.dumps(current_profile.get('education', []), ensure_ascii=False))
+    parts.append("FIELD REVIEW STANDARD (apply to existing values and unfinished sections):\n" +
+                 application_guidance.review_instructions())
+    parts.append(f"If this is Workday, read the current page-by-page procedure at "
+                 f"{application_guidance.GUIDES / 'workday.md'} before continuing. Do not load the historical archive.")
     if after == "needs_cover_letter" and (letter or {}).get("status") == "ok":
         parts.append(f"JobAppBot wrote the cover letter for this job: {letter['path']}\n"
                      "Find the application tab (tabs_context_mcp) and re-read the page. Upload this file to the cover letter "
@@ -165,10 +175,9 @@ def resume_message(questions: list[dict[str, Any]], work_dir: Path, after: Optio
     if questions:
         lines = [f"- Q: {q['question']}\n  A: {q['answer']}" for q in questions]
         parts.append("The user answered the open questions:\n" + "\n".join(lines) + "\n\nFill these answers in.")
-    parts.append("Reconcile every saved work-history and education entry with the supplied facts before reporting ready; "
-                 "continue adding missing records rather than stopping after the first entry.")
-    parts.append("Continue to the review page, take a screenshot with save_to_disk and report its path, and stop with status "
-                 "review_ready. Never click Submit. Include any new reusable facts about this form in `lessons`.")
+    parts.append("Continue to review only after the field review checks pass; otherwise report the specific blocker. "
+                 "Take a screenshot with save_to_disk and report its path. Use review_ready only for verified completion. "
+                 "Never click Submit. Include any new reusable facts about this form in `lessons`.")
     return "\n\n".join(parts)
 
 

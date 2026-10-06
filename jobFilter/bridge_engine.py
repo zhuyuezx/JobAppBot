@@ -2,7 +2,7 @@
 import json
 from pathlib import Path
 
-from jobFilter import bridge, cover_letter, profile
+from jobFilter import application_guidance, bridge, cover_letter, profile
 from jobFilter.apply_engine import COVER_LETTER_SUMMARY
 from jobFilter.application_state import RESULT_SCHEMA, claim_application, complete_application
 from jobFilter.codex import CodexCancelled, run_codex
@@ -64,7 +64,8 @@ experience and project descriptions from role_descriptions (the most complete wo
 every resume version), one "• " line per bullet; resume_text is the uploaded file and may be trimmed. If the posting clearly fits the other version, keep going and say so in the
 summary. Never submit the
 application: no Submit/Send/Finish click, Enter shortcut, scripted submit, or network submission.
-Use visible form controls for filling and navigation. Verify all filled fields before review_ready.
+Use visible form controls for filling and navigation. Apply the FIELD REVIEW STANDARD to every
+visible field, including prefilled values and optional questions, before review_ready.
 When available, advance through clearly non-submitting Next/Review controls to the final review
 page. Stop before the control that submits the application; if its effect is unclear, ask first.
 Take a screenshot of the CURRENT application page using browser_take_screenshot with filename
@@ -73,6 +74,9 @@ Keep the application tab open, and return the structured result. No shell tools 
 
 CURRENT AVAILABILITY:
 {profile.availability_instructions(task['profile'])}
+
+FIELD REVIEW STANDARD:
+{application_guidance.review_instructions()}
 
 APPLICANT AND JOB DATA:
 {json.dumps(context, ensure_ascii=False)}

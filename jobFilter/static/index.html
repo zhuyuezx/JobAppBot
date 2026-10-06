@@ -31,6 +31,10 @@
     <label class="chk" title="Hide jobs whose current suitability conclusion is Not suitable"><input type="checkbox" id="hideUnlikely"> hide not suitable</label>
   </div>
   <span class="count" id="count"></span>
+  <div class="scan-controls">
+    <button class="btn" id="scanNow" title="Fetch the latest jobs from all enabled sources using your saved filters and screening settings" aria-describedby="scanStatus"><span id="scanSpinner" class="activity-spinner" hidden aria-hidden="true"></span><span id="scanLabel">Scan now</span></button>
+    <span id="scanStatus" role="status" aria-live="polite"></span>
+  </div>
 </header>
 <main>
   <section id="tab-jobs"><div id="providerSummary" class="provider-summary"></div><div id="list"></div></section>

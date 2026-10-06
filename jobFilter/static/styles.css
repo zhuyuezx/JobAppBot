@@ -40,6 +40,11 @@
   input[type=search] { min-width:220px; }
   textarea { width:100%; min-height:80px; font-family: ui-monospace, Menlo, monospace; font-size:12px; }
   .count { color:var(--muted); margin-left:auto; }
+  .scan-controls { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  #scanNow { display:inline-flex; align-items:center; gap:7px; white-space:nowrap; }
+  #scanNow:disabled { cursor:wait; }
+  #scanStatus { max-width:280px; color:var(--muted); font-size:12px; }
+  #scanStatus.error { color:var(--badfg); }
   main { padding: 8px 20px 60px; max-width:1200px; margin:0 auto; }
   .job, .app { border-bottom:1px solid var(--line); }
   .row { display:grid; grid-template-columns: 1fr 200px 220px 130px; gap:12px; padding:10px 6px; cursor:pointer; align-items:baseline; }

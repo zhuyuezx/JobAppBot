@@ -73,6 +73,24 @@ def cmd_validate(args) -> int:
 
 
 def cmd_run(args) -> int:
+    from jobFilter import scans
+    directory = (getattr(args, 'db', None) or DB_PATH).parent
+    lock = scans.acquire(directory)
+    if lock is None:
+        log('A scan is already running; skipping this request.')
+        return 0
+    with lock:
+        run = scans.Run(directory)
+        try:
+            code = _run(args, run.update)
+        except Exception as e:
+            run.finish(1, f'Scan failed: {e}')
+            raise
+        run.finish(code)
+        return code
+
+
+def _run(args, report) -> int:
     cfg = load_config(args.config)
     search_state = search_state_from_url(args.url) if args.url else cfg["search_state"]
     errors, warnings = schema.validate(search_state)
@@ -81,6 +99,7 @@ def cmd_run(args) -> int:
     if errors:
         for e in errors:
             log(f"error: {e}")
+        report(message='Invalid search settings: ' + '; '.join(errors))
         return 1
     rules = {} if args.no_rules else cfg["rules"]
     run_id = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
@@ -89,9 +108,12 @@ def cmd_run(args) -> int:
     if args.url:  # a pasted hiring.cafe URL means "run just that search"
         cfg["sources"] = {"hiringcafe": True, "simplify": False, "startupjobs": False, "applyguy": False, "speedyapply": False}
     log(f"[{run_id}] fetching from {', '.join(n for n, c in sources.sources_config(cfg).items() if c.get('enabled'))}")
+    report(message='Fetching jobs from enabled sources…')
     jobs, counts, errors = sources.fetch_all(cfg, search_state=search_state, max_pages=args.max_pages, log=log)
+    report(source_errors=errors, fetched=len(jobs), message='Checking job filters…')
     if not jobs and errors:
         log("every source failed")
+        report(message='Could not fetch jobs. ' + '; '.join(f'{name}: {error}' for name, error in errors.items()))
         return 2
 
     kept, rejected = apply_rules(jobs, rules)
@@ -108,11 +130,13 @@ def cmd_run(args) -> int:
     to_print = kept
     if not args.no_store:
         from jobFilter.store import Store
-        store = Store(DB_PATH)
+        db_path = getattr(args, 'db', None) or DB_PATH
+        store = Store(db_path)
         excluded = [(job, reason) for job, reason in rejected if reason != "duplicate in batch"]
         new = store.upsert_many(kept + [job for job, _ in excluded], run_id,
                                 rejection_reasons={job.id: reason for job, reason in excluded})
         store.record_run(run_id, search_state, len(jobs), len(kept), len(new))
+        report(kept=len(kept), new_jobs=len(new), message=f'{len(new)} new jobs saved. Checking suitability…')
         log(f"{len(new)} new (db now {store.count()} jobs); rule-excluded postings are saved with reasons")
         if args.new_only:
             kept_ids = {job.id for job in kept}
@@ -123,12 +147,14 @@ def cmd_run(args) -> int:
         if scfg.get("enabled") and not args.no_screen:
             todo = store.unscreened(limit=int(scfg.get("max_per_run", 40)))
             if todo:
+                report(message=f'Screening suitability for {len(todo)} jobs…')
                 log(f"screening {len(todo)} unscreened job(s) with {screen.model_label(scfg)} (cap {scfg.get('max_per_run')}/run)")
                 counts = screen.screen_batch(store, todo, scfg, log=log)
                 log(f"screened: {counts}")
         # Daily collection: regenerate today's workbook from everything first seen today.
         from jobFilter.excel import write_excel
-        daily = write_excel(store.query(date=today_local()), EXCEL_DIR / f"{today_local()}.xlsx", today_local())
+        report(message='Updating daily workbook…')
+        daily = write_excel(store.query(date=today_local()), db_path.parent / 'excel' / f"{today_local()}.xlsx", today_local())
         log(f"daily excel: {daily}")
         store.close()
 
@@ -286,6 +312,7 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--xlsx", type=Path, help="also write this run's list to an .xlsx file")
     r.add_argument("--max-pages", type=int, default=25)
     r.add_argument("--no-screen", action="store_true", help="skip the post-fetch LLM screening")
+    r.add_argument("--db", type=Path, help="alternate job database")
     r.set_defaults(func=cmd_run)
 
     sc2 = sub.add_parser("screen", help="LLM-screen jobs for sponsorship / fit (default: unscreened ones)")

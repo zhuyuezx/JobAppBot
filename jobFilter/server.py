@@ -3,6 +3,7 @@
     python -m jobFilter serve            # http://127.0.0.1:8765
 
 Jobs:          GET /api/dates, /api/jobs?since=24|date=YYYY-MM-DD, /api/job?id=, /api/runs
+Scanning:      GET/POST /api/scan (status / start with saved settings)
 Screening:     POST /api/screen {job_id}  (background; /api/jobs rows carry `screening`)
 Applications:  GET /api/engine, /api/applications?status=, /api/application?id=, /api/log?id=&lines=
                POST /api/applications/queue {job_id}, /status {job_id,status,note}, /retry {job_id},
@@ -24,13 +25,14 @@ from typing import Any
 
 from jobFilter import apply_engine, cover_letter, duplicates, profile as prof
 from jobFilter.store import ACTIVE_STATUSES, APP_STATUSES, Store
-from jobFilter import application_state
+from jobFilter import application_state, scans
 
 STATIC_DIR = Path(__file__).parent / "static"
 
 
 def make_handler(store: Store, config_path: Path | None = None):
     config_path = config_path or Path(__file__).resolve().parent.parent / "setup" / "search.json"
+    scanner = scans.Controller(store.path, config_path)
     screening_jobs = set()
     screening_lock = threading.Lock()
     def screening_running(job_id):
@@ -95,6 +97,8 @@ def make_handler(store: Store, config_path: Path | None = None):
                     self._json(row or {"error": "not found"}, 200 if row else 404)
                 elif p == "/api/runs":
                     self._json(store.runs())
+                elif p == "/api/scan":
+                    self._json(scanner.status())
                 elif p == "/api/engine":
                     st = apply_engine.engine_status()
                     st["launch_settings"] = store.application_launch_defaults(st["settings"])
@@ -152,7 +156,9 @@ def make_handler(store: Store, config_path: Path | None = None):
             p = urllib.parse.urlparse(self.path).path
             b = self._body()
             try:
-                if p == "/api/jobs/review":
+                if p == "/api/scan":
+                    self._json(scanner.start())
+                elif p == "/api/jobs/review":
                     self._json(store.save_job_review(b.get("job_id", ""), {k: v for k, v in b.items() if k != "job_id"}))
                 elif p == "/api/screen":
                     from jobFilter import screen

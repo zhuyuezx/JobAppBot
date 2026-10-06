@@ -310,8 +310,10 @@ async function load() {
   }
 }
 async function loadDates() {
+  const selected = $('#date').value;
   const dates = await api('/api/dates');
   $('#date').innerHTML = dates.map(d => `<option value="${d.date}">${d.date} (${d.count})</option>`).join('') || '<option value="">no data</option>';
+  if (dates.some(d => d.date === selected)) $('#date').value = selected;
 }
 $('#mode').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
@@ -369,6 +371,60 @@ $('#list').addEventListener('click', async e => {
   if (!e.target.closest('.row')) return;          // clicks inside the expanded details do nothing
   job.classList.toggle('open');
 });
+
+// ---------------- scanning ----------------
+let scanTimer, scanRequest = 0, scanStarting = false, scanRunning = false, scanFinished;
+function renderScan(state) {
+  scanRunning = Boolean(state.running);
+  $('#scanNow').disabled = scanStarting || scanRunning;
+  $('#scanSpinner').hidden = !(scanStarting || scanRunning);
+  $('#scanLabel').textContent = scanStarting || scanRunning ? 'Scanning…' : 'Scan now';
+  const warnings = Object.keys(state.source_errors || {});
+  const message = state.message || '';
+  $('#scanStatus').textContent = message;
+  $('#scanStatus').title = [message, ...Object.entries(state.source_errors || {}).map(([name, error]) => `${VIA_LABEL[name] || name}: ${error}`),
+    state.finished_at ? `Finished ${new Date(state.finished_at).toLocaleString()}` : ''].filter(Boolean).join('\n');
+  $('#scanStatus').classList.toggle('error', state.status === 'failed' || warnings.length > 0);
+}
+async function refreshScan() {
+  clearTimeout(scanTimer);
+  const request = ++scanRequest;
+  try {
+    const state = await api('/api/scan');
+    if (request !== scanRequest) return;
+    if (state.error) throw new Error(state.error);
+    const completed = !state.running && (scanRunning || (scanFinished !== undefined && (state.finished_at || null) !== scanFinished));
+    renderScan(state);
+    scanFinished = state.finished_at || null;
+    if (completed) { await loadDates(); await load(); }
+  } catch (e) {
+    if (request !== scanRequest) return;
+    $('#scanStatus').textContent = 'Could not refresh scan status. Retrying…';
+    $('#scanStatus').classList.toggle('error', true);
+  } finally {
+    if (request === scanRequest) scanTimer = setTimeout(refreshScan, scanRunning ? 2000 : 15000);
+  }
+}
+async function startScan() {
+  if (scanStarting || scanRunning) return;
+  scanStarting = true;
+  ++scanRequest; clearTimeout(scanTimer);
+  renderScan({running:false, message:'Starting scan…'});
+  try {
+    const state = await api('/api/scan', {});
+    if (state.error) throw new Error(state.error);
+    scanStarting = false;
+    renderScan(state);
+    // Refresh also covers a scan that finishes before the first status poll.
+    if (!state.running) { await loadDates(); await load(); }
+  } catch (e) {
+    scanStarting = false;
+    renderScan({running:false, status:'failed', message:`Could not start scan: ${e.message}`});
+  } finally {
+    scanTimer = setTimeout(refreshScan, 2000);
+  }
+}
+$('#scanNow').addEventListener('click', startScan);
 
 // ---------------- applications ----------------
 let apps = [], appsTimer = null, appsRequest = 0, previousAppStatuses = new Map();
@@ -693,5 +749,6 @@ $('#answers').addEventListener('click', async e => {
 function showTab(name) { const b = document.querySelector(`#tabs button[data-tab="${name}"]`); if (b) b.click(); }
 window.addEventListener('hashchange', () => showTab(location.hash.slice(1) || 'jobs'));
 refreshProviders();
+refreshScan();
 loadApps();
 loadDates().then(load).then(() => { if (location.hash && location.hash !== '#jobs') showTab(location.hash.slice(1)); });

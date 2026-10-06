@@ -22,6 +22,9 @@ Existing applications created before this update retain their previous settings 
 | ChatGPT / Codex (`codex-playwright`) | Managed Playwright MCP bridge; dedicated Chrome profile | Prepare with GPT |
 
 Screening is selected independently under **AI settings → Job screening**.
+
+Both application providers use a shared [field review standard](../jobFilter/guidance/review.md): check prefilled values against your facts, verify saved history and graduation dates, and evaluate optional questions for their value. Relevant answers are drafted from supplied facts; important missing details are asked as open questions, which you may explicitly skip. Meaningful omissions are reported before review. Claude also loads the [Workday procedure](../jobFilter/guidance/workday.md) for that platform. New runs and continuations receive the current standard; an already-running attempt keeps its existing prompt.
+
 Saved defaults are used until a provider has application history; afterwards, the
 job controls preselect its last-used choices. Change those controls to choose differently. Existing applications retain their
 provider and session; use **Run again** to resume them. Claude remains the default

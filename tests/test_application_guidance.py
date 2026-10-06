@@ -60,6 +60,7 @@ class GuidanceTests(unittest.TestCase):
              patch.object(profile, 'role_descriptions_text', return_value=roles):
             app = {'job': {'title':'Engineer', 'company':'Example', 'apply_url':'https://example.com/job'}}
             prompt = apply_engine.build_prompt(app, self.root)
+            self.assertEqual(prompt.count(guidance.review_instructions()), 1)
             self.assertNotIn('IRRELEVANT_HISTORY', prompt)
             self.assertIn(resume, prompt)
             self.assertIn(roles, prompt)
@@ -87,3 +88,16 @@ class GuidanceTests(unittest.TestCase):
         core = apply_engine.load_skill()
         self.assertLess(len(core), 8000)
         self.assertNotIn('## Learned from runs', core)
+
+    def test_resume_refreshes_review_standard_and_education_without_loading_archive(self):
+        self.skill.write_text('HISTORICAL_NOTES ' * 20000)
+        with patch.object(apply_engine, 'SKILL_PATH', self.skill), \
+             patch.object(profile, 'load_profile', return_value={'education': [{'school':'School A', 'end':'2028-03', 'expected':True}]}):
+            for after in ('needs_login', 'captcha', 'needs_answer', 'needs_cover_letter'):
+                prompt = apply_engine.resume_message([{'question':'Optional project example?', 'answer':'Please skip this question.'}], self.root, after=after)
+                self.assertEqual(prompt.count(guidance.review_instructions()), 1)
+                self.assertIn('2028-03', prompt)
+                self.assertIn('Please skip this question.', prompt)
+                self.assertIn(str(guidance.GUIDES / 'workday.md'), prompt)
+                self.assertNotIn('HISTORICAL_NOTES', prompt)
+                self.assertLess(len(prompt), 6000)

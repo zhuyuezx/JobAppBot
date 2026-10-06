@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from jobFilter import apply_engine, bridge, bridge_engine, codex, application_state, profile, screen
+from jobFilter import application_guidance, apply_engine, bridge, bridge_engine, codex, application_state, profile, screen
 from jobFilter.models import Job
 from jobFilter.store import Store
 
@@ -318,6 +318,7 @@ class IntegrationTests(unittest.TestCase):
         app = self.store.queue_application('test', 'codex-playwright', {'codex_model': 'gpt-5.6-luna'})
         profile.save_settings({'codex_model': 'gpt-6-astra', 'codex_reasoning_effort': 'low'})
         def fake(prompt, schema, *args, **kwargs):
+            self.assertEqual(prompt.count(application_guidance.review_instructions()), 1)
             self.assertEqual(args[0], 'gpt-5.6-luna')
             self.assertEqual(kwargs['reasoning_effort'], 'high')
             self.assertEqual(kwargs['browser_url'], 'http://127.0.0.1:8931/mcp')

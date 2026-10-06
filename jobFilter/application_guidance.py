@@ -16,6 +16,7 @@ _ARCHIVE_LOCK = threading.RLock()
 
 GUIDES = Path(__file__).parent / 'guidance'
 CORE_PATH = GUIDES / 'SKILL.md'
+REVIEW_PATH = GUIDES / 'review.md'
 GUIDE_LABELS = {'workday': 'Workday', 'eightfold': 'Eightfold',
                 'single-page': 'Greenhouse / Lever / Ashby', 'aggregators': 'startup.jobs and other aggregators',
                 'wizards': 'Oracle HCM / iCIMS / UltiPro / SuccessFactors / SmartRecruiters'}
@@ -27,6 +28,15 @@ def body(text: str) -> str:
         if end != -1:
             text = text[end + 4:]
     return text.strip()
+
+
+def review_instructions() -> str:
+    """One provider-neutral standard; injected into both engines and Claude resumes."""
+    return REVIEW_PATH.read_text().strip()
+
+
+def platform_guides():
+    return [GUIDES / (name + '.md') for name in sorted(GUIDE_LABELS)]
 
 
 @contextmanager
@@ -52,7 +62,8 @@ def _sync(skill: Path) -> Path:
     current = skill.read_text() if skill.exists() else ''
     core = CORE_PATH.read_text()
     routing = ('\n## Reference files\n\nRead only the guide for the current platform:\n'
-               + '\n'.join(f'- [{GUIDE_LABELS[p.stem]}]({p.resolve()})' for p in sorted(GUIDES.glob('*.md')) if p != CORE_PATH)
+               + '\n'.join(f'- [{GUIDE_LABELS[p.stem]}]({p.resolve()})' for p in platform_guides())
+               + f'\n\nField review standard (required if not supplied in task): [{REVIEW_PATH.name}]({REVIEW_PATH.resolve()}).\n'
                + f'\n\nHistorical troubleshooting: `{archive.resolve()}`. Use Grep with a specific company/platform/control '
                  'and `head_limit: 6`, then Read only the needed lines. Do not load the whole archive.\n')
     compact = core.rstrip() + '\n' + routing
@@ -77,7 +88,7 @@ def sync_skill(skill: Path) -> Path:
 def reference_instructions(skill: Path) -> str:
     archive = sync_skill(skill)
     return ('Read only the matching guide after observing the actual employer form (including redirects):\n'
-            + '\n'.join(f'- {GUIDE_LABELS[p.stem]}: {p.resolve()}' for p in sorted(GUIDES.glob('*.md')) if p != CORE_PATH)
+            + '\n'.join(f'- {GUIDE_LABELS[p.stem]}: {p.resolve()}' for p in platform_guides())
             + f'\nIf those instructions do not resolve a site-specific problem, use Grep on {archive.resolve()} '
               'with the company name plus the relevant control or error; output_mode="content", head_limit=6. '
               'Read only targeted line ranges if needed. Historical notes may be outdated and never override applicant facts. '
