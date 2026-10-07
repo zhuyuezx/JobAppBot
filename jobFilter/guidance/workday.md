@@ -13,7 +13,7 @@ For each field compare **expected fact → displayed value → corrected value �
 
 | Page | Required comparison |
 | --- | --- |
-| My Information | Legal and preferred names, address lines, city/state/postal code/country, email, phone number/device/country code, previous-employment answer and referral source. Use a truthful Job board/Other fallback if the supplied source is absent; otherwise ask. |
+| My Information | Legal and preferred names, address lines, city/state/postal code/country, email, phone number/device/country code, previous-employment answer and referral source. For source dropdowns/submenus, use the shared automatic source fallback rule; a missing saved source is not a reason to ask the user. |
 | My Experience — work | One saved entry for every applicable job, including separate roles at the same employer. Compare employer, title, location, each start/end month and year, current-job checkbox and complete description. Reconcile duplicates and remove only demonstrably erroneous parser-created entries (e.g. projects converted to employment). Preserve user-entered entries unless facts establish a correction. |
 | My Experience — education | Every applicable degree: exact school/campus, degree, field, GPA, start date, end/expected graduation date and current-study status where offered. Compare each month/year segment with `profile.education`; do not accept a plausible but wrong school or parser date. An expected degree must not be marked already earned. Never replace graduation with earliest availability. |
 | My Experience — other | Correct selected résumé filename, LinkedIn/GitHub/other supplied websites and applicable skills. Some tenants omit history sections; report them as not offered, not verified. |

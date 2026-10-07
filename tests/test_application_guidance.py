@@ -68,7 +68,7 @@ class GuidanceTests(unittest.TestCase):
                 self.assertIn(record['school'], prompt)
             self.assertIn('Known answer', prompt)
             self.assertIn('2027-03-22', prompt)
-            self.assertLess(len(prompt) - len(resume) - len(roles), 11000)
+            self.assertLess(len(prompt) - len(resume) - len(roles), 12000)
             guidance.append_lessons(self.skill, ['New unrelated site rule ' * 200], 'Unrelated')
             self.assertEqual(apply_engine.build_prompt(app, self.root), prompt)
 
