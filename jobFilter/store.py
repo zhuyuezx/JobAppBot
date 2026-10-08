@@ -107,7 +107,7 @@ def _iso() -> str:
     return utc_now().isoformat(timespec="seconds")
 
 
-NORM_KEY_VERSION = 4  # Shared employer identities; Workday boards, iCIMS aliases, Oracle fragments.
+NORM_KEY_VERSION = 5  # Greenhouse variants; preserve full Workday year-prefixed requisitions.
 
 APP_STATUSES = ("queued", "running", "review_ready", "needs_answer", "needs_cover_letter", "needs_login", "captcha",
                 "already_applied", "unavailable", "failed", "submitted", "skipped")
@@ -184,23 +184,23 @@ class Store:
         local_date = now.astimezone().strftime("%Y-%m-%d")
         new: list[Job] = []
         cur = self.conn.cursor()
-        from jobFilter.job_identity import posting_identity
+        from jobFilter.duplicates import classify
         matched_rows: set[str] = set()
         for job in jobs:
             reason = (rejection_reasons or {}).get(job.id)
             nurl, nkey = job.norm_url(), job.norm_key()
-            # same posting seen before: by id, by cluster when neither has an apply URL, by apply URL, or (only across
-            # sources; within one source the id is authoritative) by company+title+location
+            # Reuse records only with authoritative identity evidence. Title/location
+            # similarities are grouped reversibly in the UI, never merged on ingestion.
             matches = cur.execute(
-                "SELECT id, filter_reason, apply_url, norm_url FROM jobs WHERE id = ? OR (dedup_key = ? AND norm_url IS NULL AND ? IS NULL) OR (norm_url IS NOT NULL AND norm_url = ?) "
-                "OR (norm_key = ? AND norm_key != '' AND via != ?)",
-                (job.id, job.dedup_key, nurl, nurl, nkey, job.via)).fetchall()
-            identity = posting_identity(job.apply_url)
+                "SELECT id, filter_reason, apply_url, norm_url FROM jobs WHERE id = ? "
+                "OR (dedup_key = ? AND via = ? AND norm_url IS NULL AND ? IS NULL) "
+                "OR (norm_url IS NOT NULL AND norm_url = ?) ORDER BY first_seen, id",
+                (job.id, job.dedup_key, job.via, nurl, nurl)).fetchall()
             row = next((r for r in matches if r['id'] == job.id), None)
             if row is None:
-                matches.sort(key=lambda r: r['norm_url'] != nurl)
-                row = next((r for r in matches if not (identity and posting_identity(r['apply_url'])
-                           and identity != posting_identity(r['apply_url']))), None)
+                row = next((r for r in matches if (classify({'apply_url': job.apply_url}, dict(r)) or {}).get('match_type') == 'exact'), None)
+                if row is None and nurl is None:
+                    row = next(iter(matches), None)
             if row:
                 if job.via in ('applyguy', 'speedyapply') and row['id'] != job.id:
                     # This supplemental list has no experience/sponsorship facts;
@@ -299,10 +299,11 @@ class Store:
         self.conn.execute("UPDATE jobs SET review_json=json_remove(review_json, '$.pending') WHERE id=?", (job_id,))
 
     def duplicate_candidates(self) -> list[dict[str, Any]]:
-        """Every visible job with its application status, for cross-source duplicate tagging."""
+        """Visible listings plus application history, even if a later rule excluded it."""
         return [dict(r) for r in self.conn.execute(
             "SELECT j.id, j.via, j.company, j.title, j.location, j.first_seen, j.apply_url, a.status AS app_status "
-            "FROM jobs j LEFT JOIN applications a ON a.job_id = j.id WHERE j.filter_reason IS NULL").fetchall()]
+            "FROM jobs j LEFT JOIN applications a ON a.job_id = j.id "
+            "WHERE j.filter_reason IS NULL OR a.status IS NOT NULL").fetchall()]
 
     def count(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]

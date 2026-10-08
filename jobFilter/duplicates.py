@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from jobFilter.job_identity import normalize_apply_url
+from jobFilter.job_identity import normalize_apply_url, posting_identity
 
 _COMPANY_SUFFIX = re.compile(r"\b(inc|llc|ltd|corp|corporation|co|company|limited|plc|group|holdings|technologies|technology)\b\.?")
 _TITLE_WORDS = {"graduate": "grad", "graduates": "grad", "grads": "grad", "sr": "senior", "jr": "junior", "and": "",
@@ -39,8 +39,23 @@ def company_key(company: str) -> str:
 
 
 def title_key(title: str) -> str:
-    """Title words, lowercased, with spelling variants folded ("Graduate" = "Grad", "II" = "2")."""
-    return " ".join(w for w in (_TITLE_WORDS.get(w, w) for w in _words(title).split()) if w)
+    """Conservative wording aliases for warnings, never for merging records."""
+    text = " ".join(w for w in (_TITLE_WORDS.get(w, w) for w in _words(title).split()) if w)
+    # Aggregators can retain a previous title after the employer renames a role:
+    # "Software Engineer I (New Grad 2027)" -> "Software Engineer, Early Career".
+    # Keep specialties, internships, higher levels and title locations intact.
+    if re.search(r"\b(?:new grad|early career)\b", text):
+        text = re.sub(r"\b(?:new grad|early career)\b", "early career", text)
+        text = re.sub(r"\bengineer 1\b", "engineer", text)
+        text = re.sub(r"\b20\d{2}\b", "", text)
+    return " ".join(text.split())
+
+
+def _compatible_cohort(a: str, b: str) -> bool:
+    """An omitted cohort is unknown; two explicitly different cohorts do not match."""
+    years_a = set(re.findall(r"\b20\d{2}\b", a or ""))
+    years_b = set(re.findall(r"\b20\d{2}\b", b or ""))
+    return not years_a or not years_b or bool(years_a & years_b)
 
 
 def cities(location: str) -> set[str]:
@@ -83,23 +98,52 @@ def _states(location: str) -> set[str]:
 
 
 def _compatible_location(a: str, b: str) -> bool:
+    countries_a, countries_b = _countries(a), _countries(b)
+    if countries_a and countries_b and countries_a.isdisjoint(countries_b):
+        return False
     states_a, states_b = _states(a), _states(b)
     if states_a and states_b and states_a.isdisjoint(states_b):
         return False
     return _same_place(cities(a), cities(b))
 
 
+def _countries(location: str) -> set[str]:
+    text = ' ' + _words(location) + ' '
+    names = {'us': ('united states', 'united states of america', 'usa', 'u s', 'us'),
+             'ca': ('canada',), 'gb': ('united kingdom', 'uk', 'england'),
+             'in': ('india',), 'de': ('germany',), 'au': ('australia',),
+             'ie': ('ireland',), 'sg': ('singapore',)}
+    return {code for code, aliases in names.items() if any(' ' + name + ' ' in text for name in aliases)}
+
+
+def classify(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any] | None:
+    """Shared evidence rules. Grouping is reversible; only exact URLs justify storage dedup."""
+    url_a, url_b = normalize_apply_url(a.get('apply_url')), normalize_apply_url(b.get('apply_url'))
+    if url_a and url_a == url_b:
+        return {'match_type': 'exact', 'groupable': True}
+    key = (company_key(a.get('company')), title_key(a.get('title')))
+    if not all(key) or key != (company_key(b.get('company')), title_key(b.get('title'))):
+        return None
+    if not (_compatible_location(a.get('location'), b.get('location'))
+            and _compatible_cohort(a.get('title'), b.get('title'))):
+        return None
+    identity_a, identity_b = posting_identity(a.get('apply_url')), posting_identity(b.get('apply_url'))
+    # Same title is not enough to collapse explicit, different requisitions.
+    # Broad "US" / remote matches remain warnings rather than hidden rows.
+    shared_cities = (cities(a.get('location')) & cities(b.get('location'))) - {'remote'}
+    groupable = bool(shared_cities) and not (identity_a and identity_b and identity_a != identity_b)
+    return {'match_type': 'possible', 'groupable': groupable}
+
+
 def find(rows: list[dict[str, Any]], candidates: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     """Return annotated matches, without merging jobs or their application history."""
     by_key: dict[tuple[str, str], list[dict[str, Any]]] = {}
     by_url: dict[str, list[dict[str, Any]]] = {}
-    urls = {}
     for c in candidates:
         key = (company_key(c.get("company")), title_key(c.get("title")))
         if all(key):
             by_key.setdefault(key, []).append(c)
         url = normalize_apply_url(c.get("apply_url"))
-        urls[c["id"]] = url
         if url:
             by_url.setdefault(url, []).append(c)
     out: dict[str, list[dict[str, Any]]] = {}
@@ -111,9 +155,9 @@ def find(rows: list[dict[str, Any]], candidates: list[dict[str, Any]]) -> dict[s
         for c in pool.values():
             if c['id'] == r['id']:
                 continue
-            exact = bool(url and url == urls[c['id']])
-            if exact or _compatible_location(r.get('location'), c.get('location')):
-                same.append({**c, 'match_type': 'exact' if exact else 'possible'})
+            match = classify(r, c)
+            if match:
+                same.append({**c, **match})
         if same:
             out[r['id']] = sorted(same, key=lambda c: (c.get('first_seen') or '', c['id']))
     return out

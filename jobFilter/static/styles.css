@@ -47,6 +47,8 @@
   #scanStatus.error { color:var(--badfg); }
   main { padding: 8px 20px 60px; max-width:1200px; margin:0 auto; }
   .job, .app { border-bottom:1px solid var(--line); }
+  .listing-copies { margin:0 6px 10px 24px; padding:6px 10px; border-left:2px solid var(--line); }
+  .listing-copies > summary { cursor:pointer; color:var(--muted); font-size:12px; }
   .row { display:grid; grid-template-columns: 1fr 200px 220px 130px; gap:12px; padding:10px 6px; cursor:pointer; align-items:baseline; }
   .row:hover { background:var(--chip); }
   .row .title { font-weight:600; }

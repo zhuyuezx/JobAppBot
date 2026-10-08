@@ -268,6 +268,25 @@ function rowHtml(r) {
       </div>
     </div>`;
 }
+// Use the backend's evidence rules after filtering, so a collapsed copy is
+// always accessible here. Every member must match every other member: an
+// aggregator must not bridge two different employer requisitions.
+function listingGroups(list) {
+  const groups = [];
+  for (const r of list) {
+    const group = groups.find(g => g.every(other => (r.duplicates || []).some(d => d.id === other.id && d.groupable)));
+    if (group) group.push(r); else groups.push([r]);
+  }
+  const priority = r => ['queued', 'running', 'review_ready', 'needs_answer', 'needs_login', 'needs_cover_letter', 'captcha'].includes(r.app_status) ? 0
+    : ['submitted', 'already_applied'].includes(r.app_status) ? 1 : r.review?.pending ? 2 : r.app_status ? 3 : 4;
+  return groups.map(g => g.sort((a, b) => priority(a) - priority(b) || (a.first_seen || '').localeCompare(b.first_seen || '') || a.id.localeCompare(b.id)));
+}
+function listingGroupHtml(group) {
+  const [primary, ...others] = group;
+  if (!others.length) return rowHtml(primary);
+  const exact = others.every(r => (primary.duplicates || []).some(d => d.id === r.id && d.match_type === 'exact'));
+  return `<div class="listing-group">${rowHtml(primary)}<details class="listing-copies" data-copies-id="${esc(primary.id)}"><summary>${group.length} source listings · ${exact ? 'same employer posting' : 'possible duplicates'} — show other records</summary><p class="help">Each listing keeps its own application status and tags.</p>${others.map(rowHtml).join('')}</details></div>`;
+}
 function render() {
   const q = $('#q').value.trim().toLowerCase();
   renderSrcTabs();
@@ -275,23 +294,27 @@ function render() {
   // Posting time is only day-accurate for most sources and "found" seconds differ per scan,
   // so sorting on either to the second scatters a company's postings; day granularity keeps them together.
   const postedDay = r => (r.job.published_at || '').slice(0, 10);
+  const compare = (a, b) => localDay(b.first_seen).localeCompare(localDay(a.first_seen))
+    || postedDay(b).localeCompare(postedDay(a))
+    || (a.job.company || '').localeCompare(b.job.company || '', undefined, { sensitivity: 'base' })
+    || (a.job.title || '').localeCompare(b.job.title || '')
+    || (a.job.location || '').localeCompare(b.job.location || '');
   const hideUnlikely = $('#hideUnlikely').checked;
   const shown = rows.filter(r => srcFilter === 'all' || (r.job.via || 'hiringcafe') === srcFilter)
                     .filter(r => !hideUnlikely || r.review?.state !== 'not_suitable')
                     .filter(r => !q || [r.title, r.company, r.location].join(' ').toLowerCase().includes(q))
-                    .sort((a, b) => localDay(b.first_seen).localeCompare(localDay(a.first_seen))
-                                 || postedDay(b).localeCompare(postedDay(a))
-                                 || (a.job.company || '').localeCompare(b.job.company || '', undefined, { sensitivity: 'base' })
-                                 || (a.job.title || '').localeCompare(b.job.title || '')
-                                 || (a.job.location || '').localeCompare(b.job.location || ''));
-  $('#count').textContent = `${shown.length} job${shown.length === 1 ? '' : 's'}` + (srcFilter !== 'all' || q ? ` (of ${rows.length})` : '');
+                    .sort(compare);
+  const listingSets = listingGroups(shown).sort((a, b) => compare(a[0], b[0]));
+  $('#count').textContent = (listingSets.length === shown.length ? `${shown.length} job${shown.length === 1 ? '' : 's'}`
+    : `${listingSets.length} job group${listingSets.length === 1 ? '' : 's'} · ${shown.length} listings`) + (srcFilter !== 'all' || q ? ` (of ${rows.length})` : '');
   if (!shown.length) { $('#list').innerHTML = mode === 'pending' ? '<div class="empty">No pending jobs match these filters. Use the clock button on a job to save it for a referral or later.</div>' : '<div class="empty">Nothing here. Run <code>jobfilter run</code> to fetch.</div>'; return; }
   const groups = new Map();
-  for (const r of shown) { const k = groupKey(r); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); }
-  const withRuns = list => list.map((r, i) => {
-    const same = x => x && (x.job.company || '').toLowerCase() === (r.job.company || '').toLowerCase();
+  for (const listingSet of listingSets) { const k = groupKey(listingSet[0]); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(listingSet); }
+  const withRuns = list => list.map((group, i) => {
+    const r = group[0];
+    const same = x => x && (x[0].job.company || '').toLowerCase() === (r.job.company || '').toLowerCase();
     const cls = same(list[i - 1]) || same(list[i + 1]) ? (same(list[i - 1]) ? 'run' : 'run runstart') : '';
-    return rowHtml(r).replace('<div class="job"', `<div class="job ${cls}"`);
+    return listingGroupHtml(group).replace('<div class="job"', `<div class="job ${cls}"`);
   });
   $('#list').innerHTML = [...groups.keys()].map(k => `<div class="ghead">${esc(k)} <span class="n">${groups.get(k).length}</span></div>` + withRuns(groups.get(k)).join('')).join('');
 }
@@ -299,12 +322,14 @@ let screeningTimer;
 async function load() {
   clearTimeout(screeningTimer);
   const openJobs = new Set([...document.querySelectorAll('#list .job.open')].map(el => el.dataset.id));
+  const openCopies = new Set([...document.querySelectorAll('#list .listing-copies[open]')].map(el => el.dataset.copiesId));
   let path = '/api/jobs';
   if (mode === '24h') path += '?since=24'; else if (mode === '72h') path += '?since=72';
   else if (mode === 'date') path += '?date=' + encodeURIComponent($('#date').value || '');
   if (mode === 'pending') path += '?pending=1';
   rows = (await api(path)).filter(r => mode === 'pending' || !r.filter_reason); render();
   document.querySelectorAll('#list .job').forEach(el => el.classList.toggle('open', openJobs.has(el.dataset.id)));
+  document.querySelectorAll('#list .listing-copies').forEach(el => { el.open = openCopies.has(el.dataset.copiesId); });
   if (tab === 'jobs' && rows.some(r => r.screening_running || screeningRequests.has(r.id))) {
     screeningTimer = setTimeout(() => { if (tab === 'jobs') load().catch(console.error); }, 3000);
   }

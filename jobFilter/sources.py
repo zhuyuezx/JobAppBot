@@ -8,8 +8,8 @@
 
 Enabled/configured under the `sources` key of setup/search.json; see
 setup/search.template.json. `fetch_all()` merges everything into one list;
-cross-source dedup happens in the store (normalized apply URL, then
-company+title).
+cross-source dedup uses employer posting identities in the store. Similar
+company/title/location listings are grouped reversibly in the jobs view.
 """
 from __future__ import annotations
 

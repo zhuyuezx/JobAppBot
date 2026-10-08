@@ -38,14 +38,18 @@ slugs -> `Software Development`. Countries are guessed from location strings
 (`guess_countries`); for Simplify a bare "Remote" counts as US.
 
 Ingestion dedup lives in `Store.upsert_many`: exact source ID first, then
-employer-scoped URL/requisition identity from `job_identity.py`, then compatible
-legacy keys. Known different employer requisitions never merge by title alone.
+employer-scoped URL/requisition identity from `job_identity.py`, then a same-source
+cluster only when both URLs are missing. Title/location matches never merge stored records.
 Workday board/publication variants, iCIMS careers/talent aliases, Amazon apply
-links, and Oracle job IDs in URL fragments are normalized. `NORM_KEY_VERSION`
+links, Greenhouse embeds/branded `gh_jid` URLs, and Oracle job IDs in URL fragments are normalized. `NORM_KEY_VERSION`
 forces stored keys to rebuild without deleting jobs or application history.
 `duplicates.find` also checks existing rows within the same source: shared URL
 identities are exact matches; company/title/location matches are **Possible repeat**
-warnings, not evidence to merge records.
+warnings, not evidence to merge records. `duplicates.classify` supplies the shared
+match rules. The jobs view groups exact matches and same-city possible repeats
+under an expandable source-listings row; every pair must qualify, preventing
+an aggregator from bridging different requisitions. Application history remains
+searchable for duplicates even when the original listing is later rule-excluded.
 The `jobs` table has `via`, `norm_url`, `norm_key` columns (added by
 `Store._migrate` on older databases). A source that throws is logged and
 skipped; the scan continues with the others. The `sources` block of
@@ -108,10 +112,10 @@ for most postings, including companies that do sponsor.
 
 SQLite at `data/jobs.db` (`store.py`).
 
-- `jobs`: one row per posting that passed the rules. `id` is hiring.cafe's
-  `objectID`; `dedup_key` is its `strict_dedup_cluster_id`. A job is new only
-  if neither matches an existing row; otherwise `last_seen` and `seen_count`
-  are updated. `first_seen_date` (local date) drives the daily views.
+- `jobs`: fetched postings, including rule exclusions. Source IDs and employer
+  posting identities deduplicate ingestion; ambiguous source copies retain separate
+  records. Rescans update `last_seen` and `seen_count`.
+  `first_seen_date` (local date) drives the daily views.
   `job_json` holds the normalized `Job` dict.
 - `runs`: one row per scan with fetched / kept / new counts and the search
   state used.

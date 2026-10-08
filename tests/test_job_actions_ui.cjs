@@ -74,3 +74,39 @@ test('duplicate warnings distinguish confirmed matches and possible repeats with
   assert.match(possible, /Possible repeat on SpeedyApply · submitted/);
   assert.match(possible, /may be a different requisition/);
 });
+
+test('related sources collapse to one row with submitted record first and all original actions accessible', () => {
+  const ui = frontend();
+  const result = ui.run(`(() => {
+    const original = {...${JSON.stringify(ui.job)}, id:'old', app_status:'submitted', first_seen:'2026-10-06', duplicates:[{id:'new', groupable:true, match_type:'possible'}]};
+    const copy = {...${JSON.stringify(ui.job)}, id:'new', first_seen:'2026-10-07', duplicates:[{id:'old', groupable:true, match_type:'possible', app_status:'submitted'}]};
+    const groups = listingGroups([copy, original]);
+    return {ids:groups.map(g => g.map(r => r.id)), html:listingGroupHtml(groups[0]), filtered:listingGroups([copy]).length};
+  })()`);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.ids)), [['old', 'new']]);
+  assert.match(result.html, /2 source listings · possible duplicates/);
+  assert.ok(result.html.indexOf('data-id="old"') < result.html.indexOf('<details'));
+  assert.ok(result.html.indexOf('data-id="new"') > result.html.indexOf('<details'));
+  assert.match(result.html, /Open in Applications/);
+  assert.match(result.html, /Prepare application/);
+  assert.equal(result.filtered, 1, 'source/date filters must not hide the only matching source');
+});
+
+test('unknown aggregator cannot join two different requisitions into one group', () => {
+  const ui = frontend();
+  const ids = ui.run(`listingGroups([
+    {id:'wrapper', duplicates:[{id:'a',groupable:true},{id:'b',groupable:true}]},
+    {id:'a', duplicates:[{id:'wrapper',groupable:true},{id:'b',groupable:false}]},
+    {id:'b', duplicates:[{id:'wrapper',groupable:true},{id:'a',groupable:false}]}
+  ]).map(g => g.map(r => r.id))`);
+  assert.equal(ids.length, 2);
+  assert.ok(ids.every(g => !(g.includes('a') && g.includes('b'))));
+});
+
+test('working applications take precedence over a submitted related record', () => {
+  const ui = frontend();
+  assert.equal(ui.run(`listingGroups([
+    {id:'submitted',app_status:'submitted',duplicates:[{id:'working',groupable:true}]},
+    {id:'working',app_status:'needs_answer',duplicates:[{id:'submitted',groupable:true}]}
+  ])[0][0].id`), 'working');
+});
