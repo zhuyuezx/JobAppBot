@@ -19,7 +19,7 @@ Existing applications created before this update retain their previous settings 
 | Option | Browser | How it starts |
 | --- | --- | --- |
 | Claude Code (`claude-chrome`) | Existing Claude in Chrome integration | Prepare with Claude |
-| ChatGPT / Codex (`codex-playwright`) | Managed Playwright MCP bridge; dedicated Chrome profile | Prepare with GPT |
+| ChatGPT / Codex (`codex-playwright`) | Managed Playwright MCP bridge; separate Chrome for Testing app and profile | Prepare with GPT |
 
 Screening is selected independently under **AI settings → Job screening**.
 
@@ -37,11 +37,13 @@ Install Python dependencies and the browser bridge once, from the project root:
 ```sh
 python3 -m pip install -r requirements.txt
 npm install --prefix data/browser-tools --save-exact @playwright/mcp@0.0.81 --ignore-scripts --no-audit --no-fund
+PLAYWRIGHT_BROWSERS_PATH="$PWD/data/browser-tools/browsers" node data/browser-tools/node_modules/playwright/cli.js install chromium --no-shell
 codex login
 codex login status
 ```
 
-Install Node.js and Google Chrome if missing. Sign in to Codex using **ChatGPT**.
+Install Node.js if missing. The command above installs the separate automation browser.
+Sign in to Codex using **ChatGPT**.
 The adapter also finds Codex bundled in the ChatGPT macOS app or VS Code extension.
 If it is not on your shell PATH, use that executable's full path for the login commands,
 or set `JOBFILTER_CODEX`. No API key is needed or used; runs consume subscription quota.
@@ -51,12 +53,19 @@ Restart the jobFilter server after updating and reload the frontend. Save the au
 GPT provider in AI settings. **Open automation browser** lets you open its Chrome window
 before queuing; otherwise the first application starts it automatically.
 
-The bridge uses a **separate persistent Chrome profile**, stored in ignored
+The bridge uses **Chrome for Testing**, a separate application from your default
+Google Chrome, plus a **persistent automation profile**, stored in ignored
 `data/codex-browser/profile`. Your normal Chrome sign-ins are not copied. If a job needs
 login, sign in in the automation window, then choose **Run again** in Applications.
 Missing factual answers can be entered in jobFilter; the worker resumes automatically.
 **Answer once** stays with that application, while **Answer & save to bank** also saves
 it for future jobs. CAPTCHA and account steps require your involvement.
+
+External links from other apps should open in your normal default browser. Older
+versions launched the regular Google Chrome app with an automation profile, which
+could receive those links on macOS. When upgrading, finish any open application
+forms before restarting the bridge; a server restart alone does not stop the
+persistent bridge. Keep Google Chrome as the default browser, not Chrome for Testing.
 
 Review the form in the automation Chrome window and submit it yourself, then mark the
 application submitted in jobFilter. The runner is instructed never to submit; this is

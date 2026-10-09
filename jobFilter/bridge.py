@@ -143,15 +143,21 @@ def serve():
         raise RuntimeError("Playwright MCP is not installed")
     probe = socket.socket()
     try:
+        # A just-stopped bridge can leave TCP connections in TIME_WAIT.
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         probe.bind(("127.0.0.1", port()))
     finally:
         probe.close()
-    cmd = [node, str(cli), "--browser", "chrome", "--host", "127.0.0.1", "--port", str(port()),
+    # A separate profile of Google Chrome still shares its macOS app identity,
+    # so OS-opened links can land in the automation instance. Use Playwright's
+    # separate Chrome for Testing application, never the user's default Chrome.
+    cmd = [node, str(cli), "--browser", "chromium", "--host", "127.0.0.1", "--port", str(port()),
            "--allowed-hosts", f"127.0.0.1:{port()},localhost:{port()}", "--shared-browser-context",
            "--user-data-dir", str(directory() / "profile"), "--output-dir", str(directory() / "output")]
     if os.environ.get("JOBFILTER_BRIDGE_HEADLESS") == "1":
         cmd += ["--headless"]
-    process = subprocess.Popen(cmd, cwd=ROOT)
+    env = {**os.environ, "PLAYWRIGHT_BROWSERS_PATH": str(ROOT / "data/browser-tools/browsers")}
+    process = subprocess.Popen(cmd, cwd=ROOT, env=env)
     stopping = threading.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stopping.set())
