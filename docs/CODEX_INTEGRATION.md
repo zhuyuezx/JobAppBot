@@ -90,9 +90,16 @@ It refreshes automatically and disappears when no applications are running or qu
 The local bridge listens only on `127.0.0.1:8931`. It stays alive after individual Codex
 runs and UI restarts so prepared tabs remain available. If Chrome or the bridge is
 closed, sign-ins persist on disk but unsaved form state may be lost; retry the job.
+Before each GPT run, the bridge acknowledges a fresh keep-open connection to the
+current browser. This also covers reopening Chrome for Testing after closing it:
+finishing the agent run must leave all filled tabs open for manual review. Browser
+idle auto-close is disabled. After updating older bridge versions, restart the
+bridge and UI only when no application is active and open forms have been handled.
 Logs are in `data/codex-browser/bridge.log` and the per-application **View log** panel.
 Port/profile overrides for isolated tests are `JOBFILTER_BRIDGE_PORT` and
 `JOBFILTER_BRIDGE_DIR`; `JOBFILTER_BRIDGE_HEADLESS=1` is for tests only.
+The no-LLM lifecycle regression check is
+`JOBFILTER_TEST_BROWSER=1 python3 -m unittest discover -s tests -p test_bridge_lifecycle.py`.
 
 For CLI use:
 

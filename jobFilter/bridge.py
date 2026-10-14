@@ -12,12 +12,14 @@ import sys
 import threading
 import time
 import urllib.request
+import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parent.parent
 PACKAGE_VERSION = "0.0.81"
 _start_lock = threading.Lock()
+OWNER_PROTOCOL = 1
 
 
 def directory():
@@ -110,6 +112,7 @@ def ensure_running():
     with _start_lock:
         current = status()
         if current["running"]:
+            retain_browser()
             return current["url"]
         if not current["installed"]:
             raise RuntimeError(f"Browser bridge is not installed. Run: npm install --prefix data/browser-tools --save-exact @playwright/mcp@{PACKAGE_VERSION}")
@@ -120,12 +123,77 @@ def ensure_running():
         deadline = time.monotonic() + 25
         while time.monotonic() < deadline:
             if status()["running"]:
+                retain_browser()
                 return endpoint()
             if child.poll() is not None:
                 raise RuntimeError(f"Browser bridge could not start. See {directory() / 'bridge.log'}")
             time.sleep(0.2)
         child.terminate()
         raise RuntimeError("Browser bridge startup timed out")
+
+
+def retain_browser():
+    """Ask the daemon to own the current browser before a short-lived agent connects.
+
+    A browser restart invalidates the old MCP owner without stopping the daemon.
+    A fresh owner must acquire it before the agent runs, and outlive that agent.
+    Per-request files avoid cross-process races between the UI and worker.
+    """
+    state = json.loads((directory() / "state.json").read_text())
+    if state.get("owner_protocol") != OWNER_PROTOCOL:
+        raise RuntimeError("Browser bridge needs an update. Finish any open forms, then restart the browser bridge before running GPT again.")
+    requests = directory() / "owner-requests"
+    requests.mkdir(exist_ok=True)
+    ticket = requests / uuid.uuid4().hex
+    request, reply = ticket.with_suffix(".request"), ticket.with_suffix(".reply")
+    request.touch()
+    try:
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            if reply.exists():
+                result = json.loads(reply.read_text())
+                if result.get("error"):
+                    raise RuntimeError("Could not retain the application browser: " + result["error"])
+                return
+            time.sleep(0.1)
+        raise RuntimeError("Browser owner did not respond; application was not started.")
+    finally:
+        request.unlink(missing_ok=True)
+        reply.unlink(missing_ok=True)
+
+
+def renew_owner(owner):
+    """Acquire first, release last: never leave the browser without an owner."""
+    replacement = Session(endpoint())
+    try:
+        replacement.call("browser_tabs", {"action": "list"})
+    except Exception:
+        try:
+            replacement.close()
+        except Exception:
+            pass
+        raise
+    try:
+        owner.close()
+    except Exception:
+        pass  # The old session may already have died with a previous browser.
+    return replacement
+
+
+def service_owner_requests(owner):
+    for request in (directory() / "owner-requests").glob("*.request"):
+        result = {}
+        try:
+            owner = renew_owner(owner)
+        except Exception as exc:
+            result = {"error": str(exc)}
+        if request.exists():
+            reply = request.with_suffix(".reply")
+            temp = request.with_suffix(".tmp")
+            temp.write_text(json.dumps(result))
+            temp.replace(reply)
+            request.unlink(missing_ok=True)
+    return owner
 
 
 def serve():
@@ -152,7 +220,7 @@ def serve():
     # so OS-opened links can land in the automation instance. Use Playwright's
     # separate Chrome for Testing application, never the user's default Chrome.
     cmd = [node, str(cli), "--browser", "chromium", "--host", "127.0.0.1", "--port", str(port()),
-           "--allowed-hosts", f"127.0.0.1:{port()},localhost:{port()}", "--shared-browser-context",
+           "--allowed-hosts", f"127.0.0.1:{port()},localhost:{port()}", "--shared-browser-context", "--idle-timeout", "0",
            "--user-data-dir", str(directory() / "profile"), "--output-dir", str(directory() / "output")]
     if os.environ.get("JOBFILTER_BRIDGE_HEADLESS") == "1":
         cmd += ["--headless"]
@@ -176,10 +244,10 @@ def serve():
             raise RuntimeError("Playwright MCP did not start")
         # Keeps the browser from closing when each short-lived Codex client exits.
         owner.call("browser_tabs", {"action": "list"})
-        state_path.write_text(json.dumps({"pid": os.getpid(), "port": port()}))
+        state_path.write_text(json.dumps({"pid": os.getpid(), "port": port(), "owner_protocol": OWNER_PROTOCOL}))
         print(f"Browser bridge ready: {endpoint()}", flush=True)
-        while process.poll() is None and not stopping.wait(1):
-            pass
+        while process.poll() is None and not stopping.wait(0.2):
+            owner = service_owner_requests(owner)
     finally:
         state_path.unlink(missing_ok=True)
         process.terminate()
