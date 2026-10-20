@@ -9,7 +9,7 @@ function frontend() {
   const $ = selector => {
     if (!elements.has(selector)) elements.set(selector, {
       value: 'submitted-desc', checked: false, hidden: false, textContent: '', innerHTML: '',
-      addEventListener() {}, setAttribute() {}, classList: {toggle() {}},
+      addEventListener() {}, setAttribute() {}, querySelectorAll: () => [], classList: {toggle() {}},
     });
     return elements.get(selector);
   };
@@ -101,4 +101,84 @@ test('unsuitable jobs remain visible while automation is still queued or running
     assert.equal(ui.$('#applicationActivity').hidden, false);
     assert.equal(ui.$('#appsBadge').hidden, true);
   }
+});
+
+test('a slow detail refresh never publishes a summary-only application', async () => {
+  const ui = frontend();
+  ui.context.records = [{...application('needs_answer', 'current'),
+    questions: [{id: 1, question: 'Start date?', status: 'open'}]}];
+  await ui.run('loadApps()');
+  ui.context.tab = 'apps';
+  let resolveDetails;
+  ui.context.api = async path => {
+    if (path.startsWith('/api/application?')) return new Promise(resolve => resolveDetails = resolve);
+    if (path === '/api/applications') return [application('needs_answer', 'current')];
+    return {error: 'settings unavailable'};
+  };
+  const poll = ui.run('loadApps()');
+  await new Promise(resolve => setImmediate(resolve));
+  ui.run('renderApps()');
+  assert.match(ui.$('#apps').innerHTML, /Start date\?/);
+  resolveDetails({error: 'temporary detail failure'});
+  await poll;
+  assert.match(ui.$('#apps').innerHTML, /Start date\?/);
+});
+
+function questionForm(ui) {
+  const entries = [1, 2, 3].map(id => {
+    const input = {value: `draft ${id}`};
+    const message = {textContent: ''};
+    const buttons = [{disabled: false}, {disabled: false}];
+    const q = {dataset: {qid: String(id)}, input, message, buttons,
+      querySelector: s => s === '[data-answer]' ? input : message,
+      querySelectorAll: () => buttons,
+      remove() { entries.splice(entries.indexOf(q), 1); }};
+    return q;
+  });
+  const heading = {textContent: '', remove() {}};
+  const el = {dataset: {id: 'current'}, querySelectorAll: () => entries,
+    querySelector: () => heading};
+  const q = entries[1];
+  const act = {dataset: {act: 'answer-once'}, closest: () => q};
+  ui.context.el = el;
+  ui.context.act = act;
+  ui.context.records = [{...application('needs_answer', 'current'),
+    questions: entries.map(e => ({id: Number(e.dataset.qid), question: `Question ${e.dataset.qid}`, status: 'open'}))}];
+  return {entries, q, heading};
+}
+
+test('answering the second question preserves other nodes and drafts, and blocks double clicks', async () => {
+  const ui = frontend();
+  const {entries, q, heading} = questionForm(ui);
+  const first = entries[0], third = entries[2];
+  await ui.run('loadApps()');
+  let resolveAnswer, calls = 0;
+  ui.context.api = () => { calls++; return new Promise(resolve => resolveAnswer = resolve); };
+  const save = ui.run('submitApplicationAnswer(el, act)');
+  assert.ok(q.buttons.every(b => b.disabled));
+  await ui.run('submitApplicationAnswer(el, act)');
+  assert.equal(calls, 1);
+  assert.equal(entries.length, 3);
+  first.input.value = 'edited while saving';
+  resolveAnswer({requeued: false});
+  await save;
+  assert.deepEqual(entries, [first, third]);
+  assert.equal(first.input.value, 'edited while saving');
+  assert.equal(third.input.value, 'draft 3');
+  assert.equal(heading.textContent, 'Questions for you (2)');
+  assert.equal(ui.run("apps[0].questions[1].status"), 'answered');
+  assert.equal(ui.run('apps[0].open_questions'), 2);
+});
+
+test('a failed answer save retains every input and permits retry', async () => {
+  const ui = frontend();
+  const {entries, q} = questionForm(ui);
+  await ui.run('loadApps()');
+  ui.context.api = async () => { throw new Error('offline'); };
+  await ui.run('submitApplicationAnswer(el, act)');
+  assert.equal(entries.length, 3);
+  assert.equal(q.input.value, 'draft 2');
+  assert.match(q.message.textContent, /Could not save: offline/);
+  assert.ok(q.buttons.every(b => !b.disabled));
+  assert.equal(ui.run('savingAnswers.size'), 0);
 });

@@ -454,6 +454,7 @@ $('#scanNow').addEventListener('click', startScan);
 // ---------------- applications ----------------
 let apps = [], appsTimer = null, appsRequest = 0, previousAppStatuses = new Map();
 const expandedApps = new Set(), applicationDrafts = new Map();
+const savingAnswers = new Set();
 const workingApplication = a => ['running', 'queued'].includes(a.status);
 // Terminal: the attempt is over. Everything else stays pinned at the top of Applications.
 const TERMINAL_STATUSES = ['submitted', 'already_applied', 'unavailable', 'failed', 'skipped'];
@@ -628,11 +629,12 @@ function appDetails(a) {
       ${a.page_url ? `<dt>Tab</dt><dd><a href="${esc(a.page_url)}" target="_blank" rel="noopener">${esc(a.page_url)}</a></dd>` : ''}
       <dt>Note</dt><dd><input type="text" data-note value="${esc(draft.note ?? a.note ?? '')}" placeholder="your note, saved with status changes" style="width:100%"></dd>
     </dl>
-    ${qs.length ? `<h2>Questions for you (${qs.length})</h2>` + qs.map(q => `<div class="q" data-qid="${q.id}">
+    ${qs.length ? `<h2 data-question-count>Questions for you (${qs.length})</h2>` + qs.map(q => `<div class="q" data-qid="${q.id}">
         <div class="qt">${esc(q.question)}</div>
         ${q.options ? `<div class="muted" style="white-space:normal">Options: ${esc(q.options.join(' | '))}</div>` : ''}
         <input type="text" data-answer placeholder="your answer" value="${esc(draft[q.id] ?? q.answer ?? '')}">
-        <div class="actions"><button class="btn primary" data-act="answer">Answer &amp; save to bank</button><button class="btn" data-act="answer-once">Answer once</button></div>
+        <div class="actions"><button class="btn primary" data-act="answer" ${savingAnswers.has(String(q.id)) ? 'disabled' : ''}>Answer &amp; save to bank</button><button class="btn" data-act="answer-once" ${savingAnswers.has(String(q.id)) ? 'disabled' : ''}>Answer once</button></div>
+        <span data-answer-status role="status"></span>
       </div>`).join('') : ''}
     <div class="actions">
       ${['review_ready','needs_login','captcha'].includes(a.status) ? `<a class="btn primary" href="${esc(a.page_url || j.apply_url)}" target="_blank" rel="noopener">Open the tab and finish</a>` : ''}
@@ -649,6 +651,7 @@ function appDetails(a) {
 $('#appSort').addEventListener('change', renderApps);
 $('#unfinishedOnly').addEventListener('change', renderApps);
 function renderApps() {
+  if (savingAnswers.size) return;
   const counts = {}; apps.forEach(a => counts[a.status] = (counts[a.status] || 0) + 1);
   $('#count').textContent = Object.entries(counts).map(([k, v]) => `${v} ${STATUS_LABEL[k] || k}`).join(' · ');
   updateAttention(apps.filter(attentionApplication).length);
@@ -668,6 +671,7 @@ function renderApps() {
     return recent(x, y);
   });
   const visible = apps.filter(a => !$('#unfinishedOnly').checked || !['submitted','already_applied','unavailable','skipped'].includes(a.status));
+  const questions = new Map([...$('#apps').querySelectorAll('.q')].map(q => [q.dataset.qid, q]));
   $('#apps').innerHTML = visible.map((a, rank) => `<div class="app ${expandedApps.has(a.job_id) ? 'open' : ''} ${a.status === 'running' ? 'working' : ''}" data-id="${esc(a.job_id)}">
       <div class="row">
         <div class="title"><span class="badge">#${rank + 1}</span><span class="chev" aria-hidden="true">&#9654;</span><a href="${esc(a.job.apply_url || a.hc_url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(a.job.title)}</a>${badge(a.status)}<span class="badge">${providerName(a.engine)}</span>${a.open_questions ? `<span class="badge warn">${a.open_questions} question${a.open_questions > 1 ? 's' : ''}</span>` : ''}</div>
@@ -679,6 +683,11 @@ function renderApps() {
       <div class="application-tags">${reviewBadges(a)}</div>
       ${expandedApps.has(a.job_id) ? appDetails(a) : '<div class="details"></div>'}
     </div>`).join('') || '<div class="empty">No unfinished applications.</div>';
+  // Preserve the actual inputs (including selection and drafts) across status polls.
+  for (const q of $('#apps').querySelectorAll('.q')) {
+    const previous = questions.get(q.dataset.qid);
+    if (previous) q.replaceWith(previous);
+  }
 }
 async function loadApps() {
   const request = ++appsRequest;
@@ -691,14 +700,19 @@ async function loadApps() {
       if (previousAppStatuses.get(a.job_id) !== a.status) expandedApps.add(a.job_id);
     });
     previousAppStatuses = new Map(list.filter(activeApplication).map(a => [a.job_id, a.status]));
-    apps = list;
+    // Keep fully loaded details available until the entire refresh succeeds.
+    // Publishing the summary-only list here used to temporarily erase questions.
+    let nextApps = list.map(a => ({...apps.find(old => old.job_id === a.job_id), ...a}));
+    if (tab === 'apps') {
+      const details = await Promise.all(nextApps.filter(a => expandedApps.has(a.job_id)).map(a => api('/api/application?id=' + encodeURIComponent(a.job_id))));
+      if (request !== appsRequest || tab !== 'apps') return;
+      for (const full of details) { const i = nextApps.findIndex(a => a.job_id === full.job_id); if (i >= 0 && !full.error) nextApps[i] = {...nextApps[i], ...full}; }
+    }
+    apps = nextApps;
     renderActivity();
     updateAttention(apps.filter(attentionApplication).length);
     if (tab === 'apps') {
       if (st && !st.error) engineBanner(st);
-      const details = await Promise.all(apps.filter(a => expandedApps.has(a.job_id)).map(a => api('/api/application?id=' + encodeURIComponent(a.job_id))));
-      if (request !== appsRequest || tab !== 'apps') return;
-      for (const full of details) { const i = apps.findIndex(a => a.job_id === full.job_id); if (i >= 0 && !full.error) apps[i] = {...apps[i], ...full}; }
       // Do not replace the focused input while the user is typing.
       if (!document.activeElement?.matches('#apps input, #apps textarea')) renderApps();
     }
@@ -706,6 +720,44 @@ async function loadApps() {
     if (request === appsRequest) renderActivity(true);
   } finally {
     if (request === appsRequest) appsTimer = setTimeout(loadApps, apps.some(workingApplication) ? 4000 : 15000);
+  }
+}
+async function submitApplicationAnswer(el, act) {
+  const qel = act.closest('.q'), qid = qel.dataset.qid, id = el.dataset.id;
+  const ans = qel.querySelector('[data-answer]').value.trim();
+  if (!ans || savingAnswers.has(qid)) return;
+  savingAnswers.add(qid);
+  const buttons = qel.querySelectorAll('button');
+  buttons.forEach(b => b.disabled = true);
+  const message = qel.querySelector('[data-answer-status]');
+  message.textContent = 'Saving…';
+  try {
+    const r = await api('/api/questions/answer', {id: Number(qid), answer: ans, save: act.dataset.act === 'answer'});
+    if (r.error) throw new Error(r.error);
+    // Cancel stale polls so they cannot put the just-answered question back.
+    ++appsRequest;
+    clearTimeout(appsTimer);
+    const app = apps.find(a => a.job_id === id);
+    if (app) {
+      app.questions = (app.questions || []).map(q => String(q.id) === qid ? {...q, status: 'answered', answer: ans} : q);
+      app.open_questions = app.questions.filter(q => q.status === 'open').length;
+      if (r.requeued) app.status = 'queued';
+    }
+    const draft = applicationDrafts.get(id); if (draft) delete draft[qid];
+    // Remove only this question; other inputs never leave the DOM.
+    qel.remove();
+    const count = el.querySelectorAll('.q').length;
+    const heading = el.querySelector('[data-question-count]');
+    if (heading) { if (count) heading.textContent = `Questions for you (${count})`; else heading.remove(); }
+    if (r.requeued) $('#count').textContent = 'All answered. The application will continue automatically.';
+    renderActivity();
+    updateAttention(apps.filter(attentionApplication).length);
+    appsTimer = setTimeout(loadApps, 1000);
+  } catch (err) {
+    message.textContent = 'Could not save: ' + err.message + '. Your answer is still here; please retry.';
+  } finally {
+    savingAnswers.delete(qid);
+    buttons.forEach(b => b.disabled = false);
   }
 }
 $('#apps').addEventListener('click', async e => {
@@ -726,12 +778,7 @@ $('#apps').addEventListener('click', async e => {
       if (kind === 'delete') { expandedApps.delete(id); applicationDrafts.delete(id); }
     }
     else if (kind === 'answer' || kind === 'answer-once') {
-      const qel = act.closest('.q'); const ans = qel.querySelector('[data-answer]').value.trim();
-      if (!ans) return;
-      const r = await api('/api/questions/answer', { id: Number(qel.dataset.qid), answer: ans, save: kind === 'answer' });
-      if (r.error) { alert(r.error); return; }
-      const draft = applicationDrafts.get(id); if (draft) delete draft[qel.dataset.qid];
-      if (r.requeued) $('#count').textContent = 'All answered. The application will continue automatically.';
+      await submitApplicationAnswer(el, act); return;
     }
     await loadApps(); return;
   }

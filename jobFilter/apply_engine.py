@@ -321,9 +321,7 @@ def run_application(store: Store, app: dict[str, Any]) -> dict[str, Any]:
 
     for q in answered:  # delivered
         store.conn.execute("UPDATE questions SET status = 'sent' WHERE id = ?", (q["id"],))
-    for q in out.get("unanswered_questions") or []:
-        if q.get("question"):
-            store.add_question(job_id, q["question"], q.get("options"))
+    store.replace_open_questions(job_id, out.get("unanswered_questions") or [])
     if status == "needs_answer" and not out.get("unanswered_questions"):
         status = "failed"
     if status == "needs_cover_letter":

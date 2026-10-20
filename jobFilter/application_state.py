@@ -106,10 +106,7 @@ def complete_application(store, job_id, token, result):
         if not app or app["engine"] != CODEX or app["status"] != "running" or app["session_id"] != token:
             raise ValueError("Claim is no longer active; result was not saved")
         store.conn.execute("UPDATE questions SET status='sent' WHERE job_id=? AND status='answered'", (job_id,))
-        store.conn.execute("UPDATE questions SET status='superseded' WHERE job_id=? AND status='open'", (job_id,))
-        for q in result["unanswered_questions"]:
-            store.conn.execute("INSERT INTO questions (job_id, question, options, created_at) VALUES (?,?,?,?)",
-                               (job_id, q["question"], json.dumps(q.get("options") or []), _iso()))
+        store.replace_open_questions(job_id, result["unanswered_questions"])
         store.conn.execute("UPDATE applications SET status=?, summary=?, page_url=?, screenshot=?, result_json=?, updated_at=? WHERE job_id=?",
                            (result["status"], result["summary"], result["page_url"], screenshot, json.dumps(result), _iso(), job_id))
     return {"job_id": job_id, "status": result["status"], "summary": result["summary"]}

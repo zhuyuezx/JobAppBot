@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -521,17 +522,54 @@ class Store:
         return {r[0]: r[1] for r in rows}
 
     # ----- questions -------------------------------------------------------
-    def add_question(self, job_id: str, question: str, options: Optional[list[str]] = None) -> int:
+    @staticmethod
+    def _question_key(question: str, options=None) -> tuple:
+        # Conservative identity: do not merge different prompts or choice sets.
+        def normalize(text):
+            return " ".join(unicodedata.normalize("NFKC", text).casefold().split()).rstrip(" ?")
+        return normalize(question), tuple(sorted({normalize(o) for o in options or []}))
+
+    def _add_question(self, job_id: str, question: str, options=None) -> int:
+        key = self._question_key(question, options)
+        for q in self.questions(job_id=job_id, status="open"):
+            if self._question_key(q["question"], q["options"]) == key:
+                return q["id"]
         cur = self.conn.execute(
             "INSERT INTO questions (job_id, question, options, created_at) VALUES (?,?,?,?)",
-            (job_id, question, json.dumps(options) if options else None, _iso()))
-        self.conn.commit()
+            (job_id, question.strip(), json.dumps(options) if options else None, _iso()))
         return cur.lastrowid
 
+    def add_question(self, job_id: str, question: str, options: Optional[list[str]] = None) -> int:
+        with self.conn:
+            self.conn.execute("BEGIN IMMEDIATE")
+            return self._add_question(job_id, question, options)
+
+    def replace_open_questions(self, job_id: str, questions: list[dict]) -> None:
+        """Called inside the result transaction; retain IDs for unchanged prompts."""
+        keep = {self._add_question(job_id, q["question"], q.get("options"))
+                for q in questions if q.get("question", "").strip()}
+        for row in self.conn.execute(
+                "SELECT id FROM questions WHERE job_id=? AND status='open'", (job_id,)).fetchall():
+            if row["id"] not in keep:
+                self.conn.execute("UPDATE questions SET status='superseded' WHERE id=?", (row["id"],))
+
     def answer_question(self, question_id: int, answer: str) -> Optional[dict[str, Any]]:
-        self.conn.execute("UPDATE questions SET answer = ?, status = 'answered' WHERE id = ?", (answer, question_id))
-        self.conn.commit()
-        row = self.conn.execute("SELECT * FROM questions WHERE id = ?", (question_id,)).fetchone()
+        with self.conn:
+            self.conn.execute("BEGIN IMMEDIATE")
+            row = self.conn.execute("SELECT * FROM questions WHERE id=?", (question_id,)).fetchone()
+            if row is None:
+                return None
+            q = self._q_row(row)
+            key = self._question_key(q["question"], q["options"])
+            # Resolve legacy duplicate rows too, so an invisible copy cannot block resuming.
+            for other in self.conn.execute(
+                    "SELECT * FROM questions WHERE job_id=? AND status='open'", (q["job_id"],)).fetchall():
+                other = self._q_row(other)
+                if self._question_key(other["question"], other["options"]) == key:
+                    self.conn.execute("UPDATE questions SET answer=?, status='answered' WHERE id=?",
+                                      (answer, other["id"]))
+            self.conn.execute("UPDATE questions SET answer=?, status='answered' WHERE id=?", (answer, question_id))
+            row = self.conn.execute("SELECT * FROM questions WHERE id=?", (question_id,)).fetchone()
         return self._q_row(row) if row else None
 
     def questions(self, job_id: Optional[str] = None, status: Optional[str] = None) -> list[dict[str, Any]]:
@@ -544,7 +582,16 @@ class Store:
         if clauses:
             sql += " WHERE " + " AND ".join(clauses)
         sql += " ORDER BY id"
-        return [self._q_row(r) for r in self.conn.execute(sql, params).fetchall()]
+        result, seen = [], set()
+        for row in self.conn.execute(sql, params).fetchall():
+            q = self._q_row(row)
+            key = (q["job_id"], self._question_key(q["question"], q["options"]))
+            if q["status"] == "open":
+                if key in seen:
+                    continue
+                seen.add(key)
+            result.append(q)
+        return result
 
     @staticmethod
     def _q_row(row: sqlite3.Row) -> dict[str, Any]:
