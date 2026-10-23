@@ -15,7 +15,7 @@ import urllib.parse
 from html.parser import HTMLParser
 from typing import Any, Iterator, Optional
 
-from curl_cffi import requests
+from jobFilter.http_client import requests
 
 BASE_URL = "https://hiringcafe.com"
 SEARCH_PATH = "/classic"

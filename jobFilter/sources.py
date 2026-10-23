@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from curl_cffi import requests
+from jobFilter.http_client import requests
 
 from jobFilter.hiringcafe import HiringCafeClient
 from jobFilter.models import Job

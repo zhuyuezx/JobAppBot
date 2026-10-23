@@ -10,7 +10,7 @@ import re
 import urllib.parse
 from typing import Any
 
-from curl_cffi import requests
+from jobFilter.http_client import requests
 
 from jobFilter.hiringcafe import HiringCafeClient, html_to_text
 

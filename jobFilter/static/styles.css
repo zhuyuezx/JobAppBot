@@ -91,6 +91,13 @@
   @media (max-width: 800px) { .row { grid-template-columns: 1fr; gap:2px; } .kv, .grid2 { grid-template-columns: 1fr; } }
   .app.working { border-left:3px solid var(--accent); padding-left:10px; }
   .app { scroll-margin-top:120px; }
+  .app-group { margin:12px 0; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+  .app-group-heading { margin:0; }
+  .app-group-toggle { display:flex; align-items:center; gap:10px; width:100%; padding:12px;
+    border:0; background:var(--chip); color:var(--fg); font:inherit; font-size:15px; font-weight:600; text-align:left; cursor:pointer; }
+  .app-group-toggle:focus-visible { outline:2px solid var(--accent); outline-offset:-3px; }
+  .app-group-body[hidden] { display:none; }
+  .app-group-body > .app:last-child { border-bottom:0; }
   .settings-fields label.chk { flex-direction:row; align-self:center; }
   .application-activity { position:fixed; right:20px; bottom:20px; z-index:5; width:min(360px, calc(100vw - 32px)); display:flex; flex-direction:column; align-items:flex-end; gap:10px; }
   .activity-toggle { display:flex; align-items:center; gap:10px; border:1px solid var(--accent); border-radius:999px; padding:12px 18px; background:var(--bg); color:var(--fg); font:inherit; font-weight:600; cursor:pointer; box-shadow:0 4px 20px #0002; }

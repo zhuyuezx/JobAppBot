@@ -462,6 +462,12 @@ const ATTENTION_STATUSES = ['review_ready', 'needs_answer', 'needs_login', 'capt
 const attentionApplication = a => ATTENTION_STATUSES.includes(a.status);
 // Pinned until the attempt reaches a terminal state, whatever the job's suitability.
 const activeApplication = a => !TERMINAL_STATUSES.includes(a.status);
+const APP_GROUPS = [['active', 'Active'], ['failed', 'Failed'], ['submitted', 'Submitted'],
+  ['already_applied', 'Already applied'], ['unavailable', 'Unavailable'], ['skipped', 'Skipped']];
+const applicationGroup = a => activeApplication(a) ? 'active' : a.status;
+const appGroupChoices = new Map();
+const appGroupOpen = key => appGroupChoices.get(key) ?? (key === 'active');
+const appDetailsVisible = a => expandedApps.has(a.job_id) && appGroupOpen(applicationGroup(a));
 const activePriority = a => a.status === 'running' ? 0 : a.status === 'queued' ? 1 : activeApplication(a) ? 2 : 3;
 let applicationEngine = 'claude-chrome', screeningProvider = 'claude', screeningEnabled = true;
 function updateAttention(count) { $('#appsBadge').hidden = !count; $('#appsBadge').textContent = count; }
@@ -495,6 +501,7 @@ $('#activityItems').addEventListener('click', async e => {
   const button = e.target.closest('[data-activity-id]'); if (!button) return;
   const id = button.dataset.activityId;
   expandedApps.add(id);
+  appGroupChoices.set('active', true);
   setActivityOpen(false);
   $('#tabs button[data-tab="apps"]').click();
   await loadApps();
@@ -652,6 +659,7 @@ $('#appSort').addEventListener('change', renderApps);
 $('#unfinishedOnly').addEventListener('change', renderApps);
 function renderApps() {
   if (savingAnswers.size) return;
+  const focusedGroup = document.activeElement?.dataset?.appGroupToggle;
   const counts = {}; apps.forEach(a => counts[a.status] = (counts[a.status] || 0) + 1);
   $('#count').textContent = Object.entries(counts).map(([k, v]) => `${v} ${STATUS_LABEL[k] || k}`).join(' · ');
   updateAttention(apps.filter(attentionApplication).length);
@@ -672,7 +680,7 @@ function renderApps() {
   });
   const visible = apps.filter(a => !$('#unfinishedOnly').checked || !['submitted','already_applied','unavailable','skipped'].includes(a.status));
   const questions = new Map([...$('#apps').querySelectorAll('.q')].map(q => [q.dataset.qid, q]));
-  $('#apps').innerHTML = visible.map((a, rank) => `<div class="app ${expandedApps.has(a.job_id) ? 'open' : ''} ${a.status === 'running' ? 'working' : ''}" data-id="${esc(a.job_id)}">
+  const renderApp = (a, rank) => `<div class="app ${expandedApps.has(a.job_id) ? 'open' : ''} ${a.status === 'running' ? 'working' : ''}" data-id="${esc(a.job_id)}">
       <div class="row">
         <div class="title"><span class="badge">#${rank + 1}</span><span class="chev" aria-hidden="true">&#9654;</span><a href="${esc(a.job.apply_url || a.hc_url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(a.job.title)}</a>${badge(a.status)}<span class="badge">${providerName(a.engine)}</span>${a.open_questions ? `<span class="badge warn">${a.open_questions} question${a.open_questions > 1 ? 's' : ''}</span>` : ''}</div>
         <div class="muted">${esc(a.job.company)}</div>
@@ -681,13 +689,26 @@ function renderApps() {
         ${rowActions(a)}
       </div>
       <div class="application-tags">${reviewBadges(a)}</div>
-      ${expandedApps.has(a.job_id) ? appDetails(a) : '<div class="details"></div>'}
-    </div>`).join('') || '<div class="empty">No unfinished applications.</div>';
+      ${appDetailsVisible(a) ? appDetails(a) : '<div class="details"></div>'}
+    </div>`;
+  let rank = 0;
+  $('#apps').innerHTML = APP_GROUPS.map(([key, label]) => {
+    const entries = visible.filter(a => applicationGroup(a) === key);
+    if (!entries.length) return '';
+    const open = appGroupOpen(key);
+    return `<section class="app-group" data-app-group="${key}">
+      <h2 class="app-group-heading"><button type="button" class="app-group-toggle" data-app-group-toggle="${key}" aria-expanded="${open}" aria-controls="app-group-${key}">
+        <span class="chev" aria-hidden="true">${open ? '&#9660;' : '&#9654;'}</span><span>${label}</span><span class="badge ${key === 'failed' ? 'bad' : key === 'submitted' ? 'ok' : ''}">${entries.length}</span>
+      </button></h2>
+      <div id="app-group-${key}" class="app-group-body" ${open ? '' : 'hidden'}>${entries.map(a => renderApp(a, rank++)).join('')}</div>
+    </section>`;
+  }).join('') || '<div class="empty">No unfinished applications.</div>';
   // Preserve the actual inputs (including selection and drafts) across status polls.
   for (const q of $('#apps').querySelectorAll('.q')) {
     const previous = questions.get(q.dataset.qid);
     if (previous) q.replaceWith(previous);
   }
+  if (focusedGroup) $('#apps').querySelector(`[data-app-group-toggle="${focusedGroup}"]`)?.focus();
 }
 async function loadApps() {
   const request = ++appsRequest;
@@ -696,15 +717,25 @@ async function loadApps() {
     const [st, list] = await Promise.all([tab === 'apps' ? api('/api/engine') : null, api('/api/applications')]);
     if (request !== appsRequest) return;
     if (!Array.isArray(list)) throw new Error('Invalid application status');
-    list.filter(activeApplication).forEach(a => {
-      if (previousAppStatuses.get(a.job_id) !== a.status) expandedApps.add(a.job_id);
+    list.forEach(a => {
+      const previous = previousAppStatuses.get(a.job_id);
+      if (previous === a.status) return;
+      if (activeApplication(a)) expandedApps.add(a.job_id);
+      else {
+        expandedApps.delete(a.job_id);
+        // Surface a fresh failure immediately; historical failures start collapsed.
+        if (a.status === 'failed' && previous && !TERMINAL_STATUSES.includes(previous)) {
+          expandedApps.add(a.job_id);
+          appGroupChoices.set('failed', true);
+        }
+      }
     });
-    previousAppStatuses = new Map(list.filter(activeApplication).map(a => [a.job_id, a.status]));
+    previousAppStatuses = new Map(list.map(a => [a.job_id, a.status]));
     // Keep fully loaded details available until the entire refresh succeeds.
     // Publishing the summary-only list here used to temporarily erase questions.
     let nextApps = list.map(a => ({...apps.find(old => old.job_id === a.job_id), ...a}));
     if (tab === 'apps') {
-      const details = await Promise.all(nextApps.filter(a => expandedApps.has(a.job_id)).map(a => api('/api/application?id=' + encodeURIComponent(a.job_id))));
+      const details = await Promise.all(nextApps.filter(appDetailsVisible).map(a => api('/api/application?id=' + encodeURIComponent(a.job_id))));
       if (request !== appsRequest || tab !== 'apps') return;
       for (const full of details) { const i = nextApps.findIndex(a => a.job_id === full.job_id); if (i >= 0 && !full.error) nextApps[i] = {...nextApps[i], ...full}; }
     }
@@ -761,6 +792,18 @@ async function submitApplicationAnswer(el, act) {
   }
 }
 $('#apps').addEventListener('click', async e => {
+  const groupToggle = e.target.closest('[data-app-group-toggle]');
+  if (groupToggle) {
+    if (savingAnswers.size) return;
+    const key = groupToggle.dataset.appGroupToggle;
+    const open = !appGroupOpen(key);
+    appGroupChoices.set(key, open);
+    groupToggle.setAttribute('aria-expanded', String(open));
+    groupToggle.querySelector('.chev').innerHTML = open ? '&#9660;' : '&#9654;';
+    groupToggle.closest('.app-group').querySelector('.app-group-body').hidden = !open;
+    if (open) await loadApps();
+    return;
+  }
   const el = e.target.closest('.app'); if (!el) return;
   const id = el.dataset.id, act = e.target.closest('[data-act]');
   if (act) {

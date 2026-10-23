@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const {readFileSync} = require('node:fs');
 const path = require('node:path');
 
-test('question inputs survive answer submission, failed saves, and background refreshes', {
+test('application categories preserve questions, collapse completed work, and surface new failures', {
   skip: process.env.JOBFILTER_TEST_BROWSER !== '1',
 }, async () => {
   process.env.PLAYWRIGHT_BROWSERS_PATH = path.resolve('data/browser-tools/browsers');
@@ -13,6 +13,7 @@ test('question inputs survive answer submission, failed saves, and background re
   try {
     const page = await browser.newPage();
     await page.setContent(readFileSync('jobFilter/static/index.html', 'utf8').replace(/<script.*?<\/script>/gs, ''));
+    await page.addStyleTag({content: readFileSync('jobFilter/static/styles.css', 'utf8')});
     await page.addScriptTag({content: `
       const $ = s => document.querySelector(s);
       let tab = 'apps';
@@ -25,6 +26,10 @@ test('question inputs survive answer submission, failed saves, and background re
           {id:1, question:'Start date?', status:'open'},
           {id:2, question:'Relocate?', status:'open'},
           {id:3, question:'Portfolio?', status:'open'}]};
+      const archived = ['submitted', 'unavailable', 'failed', 'already_applied', 'skipped'].map(status => ({
+        job_id: status, status, attempts:1, job:{title:'Example ' + status, company:'Fictional'},
+        summary: status === 'failed' ? 'Previous attempt failed' : '', questions:[]
+      }));
       async function api(url, body) {
         if (url === '/api/questions/answer') {
           saved.push(body);
@@ -33,7 +38,8 @@ test('question inputs survive answer submission, failed saves, and background re
           return {requeued:false};
         }
         if (url === '/api/engine') return {error:'no settings in fixture'};
-        if (url === '/api/applications') return [{...record, questions:undefined}];
+        if (url === '/api/applications') return [{...record, questions:undefined}, ...archived];
+        if (!url.endsWith('id=test')) return structuredClone(archived.find(a => url.endsWith('id=' + a.job_id)));
         return structuredClone(record);
       }
     `});
@@ -72,6 +78,38 @@ test('question inputs survive answer submission, failed saves, and background re
     await page.waitForFunction(() => document.querySelector('[data-qid="3"] [data-answer-status]').textContent.includes('offline'));
     assert.equal(await page.locator('#apps .q').count(), 2);
     assert.equal(await page.locator('[data-qid="3"] input').inputValue(), 'My portfolio');
+    // Collapsing and reopening a category must retain drafts, including after a poll.
+    await page.locator('[data-app-group-toggle="active"]').click();
+    assert.equal(await page.locator('#app-group-active').isVisible(), false);
+    await page.evaluate(async () => { await loadApps(); clearTimeout(appsTimer); });
+    await page.locator('[data-app-group-toggle="active"]').focus();
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => document.querySelector('[data-qid="3"] input'));
+    assert.equal(await page.locator('[data-qid="3"] input').inputValue(), 'My portfolio');
+    await page.evaluate(async () => {
+      record.status = 'submitted'; record.questions = [];
+      await loadApps(); clearTimeout(appsTimer);
+    });
+    assert.equal(await page.locator('#app-group-submitted').isVisible(), false);
+    assert.equal(await page.locator('[data-id="test"]').evaluate(el => el.classList.contains('open')), false);
+    await page.locator('[data-app-group-toggle="submitted"]').click();
+    assert.equal(await page.locator('#app-group-submitted').isVisible(), true);
+    await page.locator('[data-id="test"] .row').click();
+    await page.waitForFunction(() => document.querySelector('[data-id="test"] [data-log]'));
+    assert.equal(await page.locator('[data-id="test"] .details').isVisible(), true);
+    await page.locator('[data-app-group-toggle="submitted"]').click();
+    await page.evaluate(async () => {
+      record.status = 'running'; await loadApps();
+      record.status = 'failed'; record.summary = 'Could not reach the application form';
+      await loadApps(); clearTimeout(appsTimer);
+    });
+    assert.equal(await page.locator('#app-group-failed').isVisible(), true);
+    assert.equal(await page.locator('[data-id="test"] .details').isVisible(), true);
+    assert.equal(await page.locator('#app-group-submitted').isVisible(), false);
+    assert.deepEqual(await page.locator('[data-app-group]').evaluateAll(els => els.map(el => el.dataset.appGroup)),
+      ['failed', 'submitted', 'already_applied', 'unavailable', 'skipped']);
+    await page.locator('[data-app-group-toggle="failed"]').click();
+    await page.screenshot({path:'/tmp/jobfilter-application-categories.png', fullPage:true});
   } finally {
     await browser.close();
   }

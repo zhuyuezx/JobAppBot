@@ -57,7 +57,7 @@ test('blocked transitions stay pinned, open details, and leave activity only at 
     ui.context.records = [application('submitted', 'old'), application(status, 'current')];
     await ui.run('loadApps()');
     ui.run('renderApps()');
-    assert.match(ui.$('#apps').innerHTML, /^<div class="app open [^"]*" data-id="current"/);
+    assert.match(ui.$('#apps').innerHTML, /<div class="app open [^"]*" data-id="current"/);
     assert.equal(ui.$('#applicationActivity').hidden, false);
     assert.match(ui.$('#activityItems').innerHTML, /data-activity-id="current"/);
     // A user's manual collapse survives polling while the status is unchanged.
@@ -81,7 +81,7 @@ test('pending jobs stay pinned whatever their suitability, until a terminal stat
       ui.context.records = [application('submitted', 'finished'), job];
       await ui.run('loadApps()');
       ui.run('renderApps()');
-      assert.match(ui.$('#apps').innerHTML, /^<div class="app [^"]*" data-id="spacex"/, `${status} / ${state}`);
+      assert.match(ui.$('#apps').innerHTML, /<div class="app [^"]*" data-id="spacex"/, `${status} / ${state}`);
       assert.match(ui.$('#activityItems').innerHTML, /data-activity-id="spacex"/);
       assert.equal(ui.$('#appsBadge').textContent, 1);
     }
@@ -101,6 +101,55 @@ test('unsuitable jobs remain visible while automation is still queued or running
     assert.equal(ui.$('#applicationActivity').hidden, false);
     assert.equal(ui.$('#appsBadge').hidden, true);
   }
+});
+
+test('active is expanded, terminal categories are collapsed, and failed precedes submitted', async () => {
+  const ui = frontend();
+  ui.context.records = [...terminal, ...pending].map(status => application(status));
+  await ui.run('loadApps()');
+  ui.run('renderApps()');
+  const html = ui.$('#apps').innerHTML;
+  assert.match(html, /data-app-group-toggle="active" aria-expanded="true"/);
+  for (const status of terminal) {
+    assert.match(html, new RegExp(`data-app-group-toggle="${status}" aria-expanded="false"`));
+    assert.equal(ui.run(`expandedApps.has('${status}')`), false);
+  }
+  assert.ok(html.indexOf('data-app-group="failed"') < html.indexOf('data-app-group="submitted"'));
+  ui.run("appGroupChoices.set('active', false); appGroupChoices.set('submitted', true)");
+  await ui.run('loadApps()');
+  assert.equal(ui.run("appGroupOpen('active')"), false);
+  assert.equal(ui.run("appGroupOpen('submitted')"), true);
+});
+
+test('completion collapses the previous active row while manual expansion survives later polls', async () => {
+  const ui = frontend();
+  for (const status of ['submitted', 'already_applied', 'unavailable', 'skipped']) {
+    ui.context.records = [application('review_ready', 'current')];
+    await ui.run('loadApps()');
+    assert.equal(ui.run("expandedApps.has('current')"), true);
+    ui.context.records = [application(status, 'current')];
+    await ui.run('loadApps()');
+    assert.equal(ui.run("expandedApps.has('current')"), false, status);
+    ui.run("expandedApps.add('current')");
+    await ui.run('loadApps()');
+    assert.equal(ui.run("expandedApps.has('current')"), true);
+  }
+});
+
+test('a new failure opens its category and details, but a user can collapse it again', async () => {
+  const ui = frontend();
+  ui.context.records = [application('running', 'current')];
+  await ui.run('loadApps()');
+  ui.context.records = [application('failed', 'current')];
+  await ui.run('loadApps()');
+  assert.equal(ui.run("appGroupOpen('failed')"), true);
+  assert.equal(ui.run("expandedApps.has('current')"), true);
+  ui.run("appGroupChoices.set('failed', false)");
+  await ui.run('loadApps()');
+  assert.equal(ui.run("appGroupOpen('failed')"), false);
+  ui.$('#unfinishedOnly').checked = true;
+  ui.run('renderApps()');
+  assert.match(ui.$('#apps').innerHTML, /data-app-group="failed"/);
 });
 
 test('a slow detail refresh never publishes a summary-only application', async () => {

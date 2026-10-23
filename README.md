@@ -55,7 +55,7 @@ Available in both **Jobs** and **Applications**, with descriptions on hover or k
 
 Manual conclusions and tag edits survive rescans. The tag editor shows the automatic reasoning and lets you reset to automatic mode. See [suitability rules and overrides](docs/JOB_REVIEW.md).
 
-In **Applications**, use **Unfinished only** to hide submitted, already-applied, unavailable, and skipped entries. Working, queued, and pending applications (answers, login, CAPTCHA, or final review) stay at the top and in the activity box until they reach a terminal state: submitted, already applied, unavailable, skipped, or failed. Suitability does not change this. Other entries default to newest submission first. Submission time is recorded when you mark the job submitted.
+In **Applications**, **Active** is expanded by default, followed by collapsible **Failed**, **Submitted**, **Already applied**, **Unavailable**, and **Skipped** categories with counts. Completed entries collapse automatically; a new failure opens its error details. Working, queued, and pending applications (answers, login, CAPTCHA, or final review) stay in Active and the activity box. **Unfinished only** hides completed categories but keeps Failed. Sorting applies within categories, with newest submission first by default. Submission time is recorded when you mark the job submitted.
 
 **Profile** holds your details, resume status, and answer bank. **Answer once** saves an answer for that application; **Answer & save to bank** also makes it reusable.
 

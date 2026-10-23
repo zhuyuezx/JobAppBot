@@ -187,6 +187,13 @@ The scan is a short-lived process each tick (about 10 s), so its status reads
 interpreter and port. On Linux, `loginctl enable-linger $USER` keeps the user
 session (and the timer) alive after logout.
 
+On macOS, `http_client.py` loads CoreFoundation and SystemConfiguration before
+`curl_cffi`. This handles wheels with missing framework links that otherwise
+fail in fresh scan processes with `_CFArrayAppendValue` or `_CFRelease` errors.
+`jobfilter status` reports whether the hourly agent is loaded and its last exit
+code; an enabled schedule can still have failing scans. Check `jobfilter log`
+for scheduled failures and `data/scan.log` for manual scan failures.
+
 Verified on macOS 15 and Ubuntu 22.04 / Python 3.9 (systemd user session in
 a container).
 
